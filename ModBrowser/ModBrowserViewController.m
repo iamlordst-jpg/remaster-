@@ -372,7 +372,6 @@
     self.sourceControl = [[UISegmentedControl alloc] initWithItems:@[@"Modrinth", @"CurseForge"]];
     self.sourceControl.selectedSegmentIndex = 0;
     [self.sourceControl addTarget:self action:@selector(sourceChanged:) forControlEvents:UIControlEventValueChanged];
-    self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Manage Mods" style:UIBarButtonItemStylePlain target:self action:@selector(showInstalledMods)];
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"slider.horizontal.3"] style:UIBarButtonItemStylePlain target:self action:@selector(showFilters)];
     self.definesPresentationContext = YES;
     self.activity = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
@@ -698,19 +697,6 @@
     if (field) [field replaceRange:field.selectedTextRange withText:@"."];
 }
 - (void)dismissVersionKeyboard { [self.customVersionField resignFirstResponder]; }
-- (void)showInstalledMods {
-    NSString *directory = [self modsDirectoryForSelectedProfile];
-    NSError *error = nil;
-    if (![NSFileManager.defaultManager createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:&error]) {
-        [self showMessage:error.localizedDescription ?: @"Could not access the mods folder." title:@"Manage Mods"];
-        return;
-    }
-    ModManagerViewController *manager = [[ModManagerViewController alloc] initWithDirectory:directory];
-    UINavigationController *navigation = [[UINavigationController alloc] initWithRootViewController:manager];
-    navigation.modalPresentationStyle = UIModalPresentationPageSheet;
-    [self presentViewController:navigation animated:YES completion:nil];
-}
-
 - (void)downloadVersion:(NSDictionary *)version project:(NSDictionary *)project {
     NSDictionary *file = nil;
     NSArray *files = [version[@"files"] isKindOfClass:NSArray.class] ? version[@"files"] : @[];
