@@ -61,6 +61,91 @@
 }
 @end
 
+@interface ModManagerViewController : UITableViewController
+@property(nonatomic) NSString *modsDirectory;
+@property(nonatomic) NSMutableArray<NSString *> *modFiles;
+- (instancetype)initWithDirectory:(NSString *)directory;
+@end
+
+@implementation ModManagerViewController
+- (instancetype)initWithDirectory:(NSString *)directory {
+    self = [super initWithStyle:UITableViewStyleInsetGrouped];
+    if (self) { _modsDirectory = directory; _modFiles = [NSMutableArray array]; self.title = @"Manage Mods"; }
+    return self;
+}
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(close)];
+    self.tableView.rowHeight = UITableViewAutomaticDimension;
+    self.tableView.estimatedRowHeight = 60;
+    [self reloadMods];
+}
+- (void)close { [self dismissViewControllerAnimated:YES completion:nil]; }
+- (void)reloadMods {
+    NSError *error = nil;
+    NSArray *files = [NSFileManager.defaultManager contentsOfDirectoryAtPath:self.modsDirectory error:&error];
+    [self.modFiles removeAllObjects];
+    if (!error) for (NSString *name in files) {
+        NSString *lower = name.lowercaseString;
+        if ([lower hasSuffix:@".jar"] || [lower hasSuffix:@".jar.disabled"]) [self.modFiles addObject:name];
+    }
+    [self.modFiles sortUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
+    self.tableView.backgroundView = error ? [self messageLabel:[NSString stringWithFormat:@"Could not read folder:\n%@", error.localizedDescription]] :
+        (self.modFiles.count ? nil : [self messageLabel:@"No mods found in this Minecraft directory."]);
+    [self.tableView reloadData];
+}
+- (UIView *)messageLabel:(NSString *)text {
+    UILabel *label = [[UILabel alloc] initWithFrame:self.tableView.bounds];
+    label.text = text; label.textAlignment = NSTextAlignmentCenter; label.textColor = UIColor.secondaryLabelColor;
+    label.numberOfLines = 0; label.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    return label;
+}
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return self.modFiles.count; }
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"installed-mod"];
+    if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"installed-mod"];
+    NSString *name = self.modFiles[indexPath.row];
+    BOOL disabled = [name.lowercaseString hasSuffix:@".jar.disabled"];
+    cell.textLabel.text = name;
+    cell.textLabel.numberOfLines = 2;
+    cell.detailTextLabel.text = disabled ? @"Disabled — won't load next launch" : @"Enabled";
+    cell.detailTextLabel.textColor = disabled ? UIColor.secondaryLabelColor : UIColor.systemGreenColor;
+    cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    return cell;
+}
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    NSString *name = self.modFiles[indexPath.row];
+    BOOL disabled = [name.lowercaseString hasSuffix:@".jar.disabled"];
+    UIAlertController *actions = [UIAlertController alertControllerWithTitle:name message:disabled ? @"This mod is disabled." : @"This mod is enabled." preferredStyle:UIAlertControllerStyleActionSheet];
+    [actions addAction:[UIAlertAction actionWithTitle:disabled ? @"Enable mod" : @"Disable mod" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        NSString *newName = disabled ? [name substringToIndex:name.length - @".disabled".length] : [name stringByAppendingString:@".disabled"];
+        NSError *error = nil;
+        if (![NSFileManager.defaultManager moveItemAtPath:[self.modsDirectory stringByAppendingPathComponent:name] toPath:[self.modsDirectory stringByAppendingPathComponent:newName] error:&error]) {
+            [self presentError:error.localizedDescription ?: @"Could not change mod state"];
+        } else [self reloadMods];
+    }]];
+    [actions addAction:[UIAlertAction actionWithTitle:@"Delete mod…" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+        UIAlertController *confirm = [UIAlertController alertControllerWithTitle:@"Delete mod?" message:@"This removes the JAR from this mods folder." preferredStyle:UIAlertControllerStyleAlert];
+        [confirm addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+        [confirm addAction:[UIAlertAction actionWithTitle:@"Delete" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *confirmAction) {
+            NSError *error = nil;
+            if (![NSFileManager.defaultManager removeItemAtPath:[self.modsDirectory stringByAppendingPathComponent:name] error:&error]) [self presentError:error.localizedDescription ?: @"Could not delete mod"];
+            else [self reloadMods];
+        }]];
+        [self presentViewController:confirm animated:YES completion:nil];
+    }]];
+    [actions addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    if (actions.popoverPresentationController) { actions.popoverPresentationController.sourceView = tableView; actions.popoverPresentationController.sourceRect = [tableView rectForRowAtIndexPath:indexPath]; }
+    [self presentViewController:actions animated:YES completion:nil];
+}
+- (void)presentError:(NSString *)message {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Mod manager" message:message preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+@end
+
 @interface ModVersionListController : UITableViewController
 @property(nonatomic) NSDictionary *project;
 @property(nonatomic) NSString *loader;
@@ -576,38 +661,14 @@
 - (void)showInstalledMods {
     NSString *directory = [self modsDirectoryForSelectedProfile];
     NSError *error = nil;
-    NSArray<NSString *> *files = [NSFileManager.defaultManager contentsOfDirectoryAtPath:directory error:&error];
-    if (error) { [self showMessage:[NSString stringWithFormat:@"Could not read mods folder:\n%@\n\nPath: %@", error.localizedDescription, directory] title:@"Manage Mods"]; return; }
-    NSMutableArray<NSString *> *mods = [NSMutableArray array];
-    for (NSString *name in files) {
-        NSString *lower = name.lowercaseString;
-        if ([lower hasSuffix:@".jar"] || [lower hasSuffix:@".jar.disabled"]) [mods addObject:name];
+    if (![NSFileManager.defaultManager createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:&error]) {
+        [self showMessage:error.localizedDescription ?: @"Could not access the mods folder." title:@"Manage Mods"];
+        return;
     }
-    if (!mods.count) { [self showMessage:[NSString stringWithFormat:@"No mod JARs found.\n\nFolder checked:\n%@", directory] title:@"Manage Mods"]; return; }
-    UIAlertController *list = [UIAlertController alertControllerWithTitle:@"Installed Mods" message:directory preferredStyle:UIAlertControllerStyleActionSheet];
-    for (NSString *name in mods) {
-        BOOL disabled = [name.lowercaseString hasSuffix:@".jar.disabled"];
-        [list addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"%@ — %@", disabled ? @"Enable" : @"Disable", name] style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-            NSString *from = [directory stringByAppendingPathComponent:name];
-            NSString *toName = disabled ? [name substringToIndex:name.length - @".disabled".length] : [name stringByAppendingString:@".disabled"];
-            NSError *moveError = nil;
-            if (![NSFileManager.defaultManager moveItemAtPath:from toPath:[directory stringByAppendingPathComponent:toName] error:&moveError]) [self showMessage:moveError.localizedDescription title:@"Could not change mod state"];
-            else [self showInstalledMods];
-        }]];
-        [list addAction:[UIAlertAction actionWithTitle:[@"Delete " stringByAppendingString:name] style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
-            UIAlertController *confirm = [UIAlertController alertControllerWithTitle:@"Delete mod?" message:name preferredStyle:UIAlertControllerStyleAlert];
-            [confirm addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-            [confirm addAction:[UIAlertAction actionWithTitle:@"Delete" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *confirmAction) {
-                NSError *removeError = nil;
-                if (![NSFileManager.defaultManager removeItemAtPath:[directory stringByAppendingPathComponent:name] error:&removeError]) [self showMessage:removeError.localizedDescription title:@"Could not delete mod"];
-                else [self showInstalledMods];
-            }]];
-            [self presentViewController:confirm animated:YES completion:nil];
-        }]];
-    }
-    [list addAction:[UIAlertAction actionWithTitle:@"Done" style:UIAlertActionStyleCancel handler:nil]];
-    if (list.popoverPresentationController) list.popoverPresentationController.barButtonItem = self.navigationItem.leftBarButtonItem;
-    [self presentViewController:list animated:YES completion:nil];
+    ModManagerViewController *manager = [[ModManagerViewController alloc] initWithDirectory:directory];
+    UINavigationController *navigation = [[UINavigationController alloc] initWithRootViewController:manager];
+    navigation.modalPresentationStyle = UIModalPresentationPageSheet;
+    [self presentViewController:navigation animated:YES completion:nil];
 }
 
 - (void)downloadVersion:(NSDictionary *)version project:(NSDictionary *)project {
