@@ -1,3 +1,4 @@
+#include <stdlib.h>
 #import "ModBrowserViewController.h"
 #import "PLProfiles.h"
 
@@ -512,7 +513,7 @@
             UIBarButtonItem *dot = [[UIBarButtonItem alloc] initWithTitle:@"." style:UIBarButtonItemStylePlain target:self action:@selector(insertVersionDot:)];
             UIBarButtonItem *space = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil];
             UIBarButtonItem *done = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(dismissVersionKeyboard)];
-            toolbar.items = @[space, dot, space, done]; field.inputAccessoryView = toolbar; field.tag = 7312;
+            toolbar.items = @[space, dot, space, done]; field.inputAccessoryView = toolbar; field.tag = 7312; self.customVersionField = field;
         }];
         [input addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
         [input addAction:[UIAlertAction actionWithTitle:@"Apply" style:UIAlertActionStyleDefault handler:^(UIAlertAction *apply) {
@@ -650,14 +651,10 @@
     return [[applicationSupport stringByAppendingPathComponent:@"minecraft"] stringByAppendingPathComponent:@"mods"];
 }
 - (void)insertVersionDot:(UIBarButtonItem *)sender {
-    UITextField *field = nil;
-    for (UIView *view in self.presentedViewController.view.subviews) {
-        if ([view isKindOfClass:UITextField.class] && ((UITextField *)view).tag == 7312) field = (UITextField *)view;
-        for (UIView *child in view.subviews) if ([child isKindOfClass:UITextField.class] && ((UITextField *)child).tag == 7312) field = (UITextField *)child;
-    }
+    UITextField *field = self.customVersionField;
     if (field) [field replaceRange:field.selectedTextRange withText:@"."];
 }
-- (void)dismissVersionKeyboard { [self.presentedViewController.view endEditing:YES]; }
+- (void)dismissVersionKeyboard { [self.customVersionField resignFirstResponder]; }
 - (void)showInstalledMods {
     NSString *directory = [self modsDirectoryForSelectedProfile];
     NSError *error = nil;
