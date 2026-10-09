@@ -32,8 +32,14 @@
     return self;
 }
 
+- (NSString *)imageName {
+    return @"shippingbox";
+}
+
 - (void)viewDidLoad {
     [super viewDidLoad];
+    self.refreshControl = [[UIRefreshControl alloc] init];
+    [self.refreshControl addTarget:self action:@selector(refreshProjects) forControlEvents:UIControlEventValueChanged];
     self.tableView.rowHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedRowHeight = 88;
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
@@ -55,6 +61,11 @@
 
 - (void)debouncedSearch {
     self.query = self.searchController.searchBar.text ?: @"";
+    [self searchForProjectsReset:YES];
+}
+
+- (void)refreshProjects {
+    self.loading = NO;
     [self searchForProjectsReset:YES];
 }
 
@@ -98,6 +109,7 @@
             if (!self) return;
             self.loading = NO;
             [self.activity stopAnimating];
+            [self.refreshControl endRefreshing];
             self.tableView.tableFooterView = [[UIView alloc] initWithFrame:CGRectZero];
             if (error || ![json isKindOfClass:NSDictionary.class]) {
                 if (self.projects.count == 0) {
@@ -280,10 +292,7 @@
         [self showMessage:[NSString stringWithFormat:@"%@ is already installed.", filename] title:@"Already installed"];
         return;
     }
-    UIProgressView *progress = [[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleDefault];
-    progress.frame = CGRectMake(0, 0, 220, 4);
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Installing mod…" message:filename preferredStyle:UIAlertControllerStyleAlert];
-    [alert setValue:progress forKey:@"accessoryView"];
     [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     [self presentViewController:alert animated:YES completion:nil];
     NSURLSessionDownloadTask *task = [NSURLSession.sharedSession downloadTaskWithURL:url completionHandler:^(NSURL *location, NSURLResponse *response, NSError *error) {
