@@ -596,7 +596,9 @@
                     UIImage *image = data ? [UIImage imageWithData:data] : nil;
                     if (!image) return;
                     CGSize target = CGSizeMake(96, 96);
-                    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:target];
+                    UIGraphicsImageRendererFormat *format = [[UIGraphicsImageRendererFormat alloc] init];
+                    format.scale = 1.0; // Keep thumbnails at 96x96 pixels instead of scaling them up for Retina.
+                    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:target format:format];
                     UIImage *thumbnail = [renderer imageWithActions:^(UIGraphicsImageRendererContext *context) {
                         CGFloat scale = MIN(target.width / MAX(image.size.width, 1), target.height / MAX(image.size.height, 1));
                         CGSize fitted = CGSizeMake(image.size.width * scale, image.size.height * scale);
@@ -722,7 +724,7 @@
     }
     if (!file) { [self showMessage:@"No downloadable .jar was found for this version." title:@"Cannot install mod"]; return; }
     NSURL *url = [NSURL URLWithString:file[@"url"] ?: @""];
-    if (!url || !url.scheme.length) { [self showMessage:@"Modrinth returned an invalid download URL." title:@"Download failed"]; return; }
+    if (!url || !url.scheme.length) { [self showMessage:@"This version has no accessible download URL." title:@"Download failed"]; return; }
     NSString *directory = [self modsDirectoryForSelectedProfile];
     NSError *directoryError = nil;
     if (![NSFileManager.defaultManager createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:&directoryError]) {
