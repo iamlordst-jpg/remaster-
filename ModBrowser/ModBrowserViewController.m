@@ -687,9 +687,22 @@
     [self presentViewController:alert animated:YES completion:nil];
 }
 - (NSString *)modsDirectoryForSelectedProfile {
-    // Match JavaLauncher.m exactly: Minecraft runs from
-    // AME_HOME/instances/<general.game_directory>/<selected profile's gameDir>.
-    // GAME_DIR is not the selected profile's actual runtime directory.
+    NSFileManager *fm = NSFileManager.defaultManager;
+
+    // LiveContainer's Files-visible Minecraft data directory:
+    // <app container>/Documents/library/application support/minecraft/
+    // Prefer it only when it looks like a real Minecraft root, not just an empty folder.
+    NSString *containerMinecraft = [[NSHomeDirectory()
+        stringByAppendingPathComponent:@"Documents/library/application support/minecraft"]
+        stringByStandardizingPath];
+    BOOL hasVersions = [fm fileExistsAtPath:[containerMinecraft stringByAppendingPathComponent:@"versions"]];
+    BOOL hasAssets = [fm fileExistsAtPath:[containerMinecraft stringByAppendingPathComponent:@"assets"]];
+    BOOL hasLibraries = [fm fileExistsAtPath:[containerMinecraft stringByAppendingPathComponent:@"libraries"]];
+    if (hasVersions && hasAssets && hasLibraries) {
+        return [containerMinecraft stringByAppendingPathComponent:@"mods"];
+    }
+
+    // Otherwise match JavaLauncher.m: AME_HOME/instances/<group>/<profile gameDir>.
     const char *home = getenv("AME_HOME");
     if (home && home[0] != '\0') {
         NSString *instanceGroup = getPrefObject(@"general.game_directory");
