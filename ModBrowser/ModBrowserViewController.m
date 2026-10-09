@@ -10,6 +10,7 @@
 @property(nonatomic) BOOL loading;
 @property(nonatomic) NSInteger offset;
 @property(nonatomic) NSInteger totalHits;
+@property(nonatomic) NSUInteger searchGeneration;
 @property(nonatomic) NSURLSessionDataTask *searchTask;
 @property(nonatomic) UIActivityIndicatorView *activity;
 @end
@@ -76,12 +77,17 @@
 }
 
 - (void)searchForProjectsReset:(BOOL)reset {
-    if (self.loading) return;
     if (reset) {
+        [self.searchTask cancel];
+        self.loading = NO;
+        self.searchGeneration += 1;
         self.offset = 0;
         self.totalHits = NSIntegerMax;
         [self.projects removeAllObjects];
+    } else if (self.loading) {
+        return;
     }
+    NSUInteger generation = self.searchGeneration;
     self.loading = YES;
     [self.activity startAnimating];
     self.tableView.tableFooterView = self.activity;
@@ -106,7 +112,7 @@
         NSDictionary *json = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
         dispatch_async(dispatch_get_main_queue(), ^{
             __strong typeof(weakSelf) self = weakSelf;
-            if (!self) return;
+            if (!self || generation != self.searchGeneration) return;
             self.loading = NO;
             [self.activity stopAnimating];
             [self.refreshControl endRefreshing];
