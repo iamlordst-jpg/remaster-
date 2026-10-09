@@ -110,42 +110,84 @@
     if (self.loading || !self.hasMore) return;
     self.loading = YES;
     UIActivityIndicatorView *spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
-    [spinner startAnimating];
-    self.tableView.tableFooterView = spinner;
-    NSMutableArray<NSURLQueryItem *> *items = [NSMutableArray arrayWithObjects:
-        [NSURLQueryItem queryItemWithName:@"loaders" value:[NSString stringWithFormat:@"[\"%@\"]", self.loader]],
-        [NSURLQueryItem queryItemWithName:@"limit" value:@"100"],
-        [NSURLQueryItem queryItemWithName:@"offset" value:[NSString stringWithFormat:@"%ld", (long)self.offset]], nil];
-    if (self.minecraftVersion.length) {
-        [items addObject:[NSURLQueryItem queryItemWithName:@"game_versions" value:[NSString stringWithFormat:@"[\"%@\"]", self.minecraftVersion]]];
+    [spinner startAnimating]; self.tableView.tableFooterView = spinner;
+    NSMutableURLRequest *request = nil;
+    if ([self.project[@"source"] isEqual:@"curseforge"]) {
+        NSMutableArray<NSURLQueryItem *> *items = [NSMutableArray arrayWithObjects:
+            [NSURLQueryItem queryItemWithName:@"pageSize" value:@"50"],
+            [NSURLQueryItem queryItemWithName:@"index" value:[NSString stringWithFormat:@"%ld", (long)self.offset]], nil];
+        NSDictionary *loaderIDs = @{@"forge":@"1", @"fabric":@"4", @"quilt":@"5", @"neoforge":@"6"};
+        [items addObject:[NSURLQueryItem queryItemWithName:@"modLoaderType" value:loaderIDs[self.loader] ?: @"1"]];
+        if (self.minecraftVersion.length) [items addObject:[NSURLQueryItem queryItemWithName:@"gameVersion" value:self.minecraftVersion]];
+        NSURLComponents *components = [NSURLComponents componentsWithString:[NSString stringWithFormat:@"https://api.curseforge.com/v1/mods/%@/files", self.project[@"project_id"] ?: @""]];
+        components.queryItems = items;
+        request = [NSMutableURLRequest requestWithURL:components.URL];
+        [request setValue:[NSUserDefaults.standardUserDefaults stringForKey:@"AmethystCurseForgeAPIKey"] ?: @"" forHTTPHeaderField:@"x-api-key"];
+    } else {
+        NSMutableArray<NSURLQueryItem *> *items = [NSMutableArray arrayWithObjects:
+            [NSURLQueryItem queryItemWithName:@"loaders" value:[NSString stringWithFormat:@"[\"%@\"]", self.loader]],
+            [NSURLQueryItem queryItemWithName:@"limit" value:@"100"],
+            [NSURLQueryItem queryItemWithName:@"offset" value:[NSString stringWithFormat:@"%ld", (long)self.offset]], nil];
+        if (self.minecraftVersion.length) [items addObject:[NSURLQueryItem queryItemWithName:@"game_versions" value:[NSString stringWithFormat:@"[\"%@\"]", self.minecraftVersion]]];
+        NSURLComponents *components = [NSURLComponents componentsWithString:[NSString stringWithFormat:@"https://api.modrinth.com/v2/project/%@/version", self.project[@"project_id"] ?: @""]];
+        components.queryItems = items;
+        request = [NSMutableURLRequest requestWithURL:components.URL];
     }
-    NSURLComponents *components = [NSURLComponents componentsWithString:[NSString stringWithFormat:@"https://api.modrinth.com/v2/project/%@/version", self.project[@"project_id"] ?: @""]];
-    components.queryItems = items;
-    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:components.URL];
     request.timeoutInterval = 30;
-    [request setValue:@"Amethyst-iOS-ModBrowser/1.1" forHTTPHeaderField:@"User-Agent"];
+    [request setValue:@"Amethyst-iOS-ModBrowser/1.2" forHTTPHeaderField:@"User-Agent"];
     __weak typeof(self) weakSelf = self;
     [[NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-        NSArray *page = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+        NSDictionary *json = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
         dispatch_async(dispatch_get_main_queue(), ^{
             __strong typeof(weakSelf) self = weakSelf;
             if (!self) return;
-            self.loading = NO;
-            [self.tableView.refreshControl endRefreshing];
-            self.tableView.tableFooterView = [[UIView alloc] initWithFrame:CGRectZero];
-            if (error || ![page isKindOfClass:NSArray.class]) {
-                self.tableView.backgroundView = self.versions.count ? nil : [self messageView:@"Couldn’t load versions. Pull down to retry."];
+            self.loading = NO; [self.tableView.refreshControl endRefreshing]; self.tableView.tableFooterView = [[UIView alloc] initWithFrame:CGRectZero];
+            NSArray *page = nil;
+            if (!error && [self.project[@"source"] isEqual:@"curseforge"]) {
+                NSArray *rawFiles = [json[@"data"] isKindOfClass:NSArray.class] ? json[@"data"] : @[];
+                NSMutableArray *normalized = [NSMutableArray array];
+                NSDictionary *loaderNames = @{@"1":@"forge", @"4":@"fabric", @"5":@"quilt", @"6":@"neoforge"};
+                for (NSDictionary *file in rawFiles) {
+                    NSString *loaderName = loaderNames[[file[@"modLoader"] description]] ?: self.loader;
+                    NSString *gameVersion = self.minecraftVersion ?: ([file[@"gameVersions"] isKindOfClass:NSArray.class] ? [file[@"gameVersions"] firstObject] : @"");
+                    NSString *downloadURL = file[@"downloadUrl"] ?: @"";
+                    NSString *filename = file[@"fileName"] ?: @"mod.jar";
+                    NSMutableArray *dependencies = [NSMutableArray array];
+                    for (NSDictionary *dep in ([file[@"dependencies"] isKindOfClass:NSArray.class] ? file[@"dependencies"] : @[])) {
+                        // CurseForge relationType 3 = required dependency.
+                        [dependencies addObject:@{@"project_id":[dep[@"modId"] description] ?: @"", @"dependency_type":[dep[@"relationType"] integerValue] == 3 ? @"required" : @"optional"}];
+                    }
+                    [normalized addObject:@{
+                        @"name":file[@"displayName"] ?: filename,
+                        @"version_number":[file[@"id"] description] ?: @"",
+                        @"game_versions":gameVersion.length ? @[gameVersion] : @[],
+                        @"loaders":@[loaderName],
+                        @"version_type":[file[@"releaseType"] integerValue] == 1 ? @"release" : ([file[@"releaseType"] integerValue] == 2 ? @"beta" : @"alpha"),
+                        @"date_published":file[@"fileDate"] ?: @"",
+                        @"dependencies":dependencies,
+                        @"files":@[@{@"filename":filename, @"url":downloadURL, @"primary":@YES}]
+                    }];
+                }
+                page = normalized;
+                NSInteger total = [json[@"pagination"][@"totalCount"] integerValue];
+                self.hasMore = self.offset + rawFiles.count < total;
+            } else if (!error && [json isKindOfClass:NSArray.class]) {
+                page = (NSArray *)json;
+                self.hasMore = page.count == 100;
+            } else {
+                self.tableView.backgroundView = self.versions.count ? nil : [self messageView:@"Couldn’t load versions. Check your connection and pull down to retry."];
                 [self.tableView reloadData];
                 return;
             }
-            [self.versions addObjectsFromArray:page];
+            [self.versions addObjectsFromArray:page ?: @[]];
             self.offset += page.count;
-            self.hasMore = page.count == 100;
+            if (![self.project[@"source"] isEqual:@"curseforge"]) self.hasMore = page.count == 100;
             self.tableView.backgroundView = self.versions.count ? nil : [self messageView:@"No versions match this loader and Minecraft version. Change the filters to see more."];
             [self.tableView reloadData];
         });
     }] resume];
 }
+
 - (UIView *)messageView:(NSString *)message {
     UILabel *label = [[UILabel alloc] initWithFrame:self.tableView.bounds];
     label.text = message;
