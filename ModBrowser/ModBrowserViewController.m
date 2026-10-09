@@ -350,7 +350,12 @@
             field.placeholder = @"1.20.1";
             field.text = self.minecraftVersion;
             field.autocapitalizationType = UITextAutocapitalizationTypeNone;
-            field.keyboardType = UIKeyboardTypeDecimalPad;
+            field.keyboardType = UIKeyboardTypeNumberPad;
+            UIToolbar *toolbar = [[UIToolbar alloc] initWithFrame:CGRectMake(0, 0, 0, 44)];
+            UIBarButtonItem *dot = [[UIBarButtonItem alloc] initWithTitle:@"." style:UIBarButtonItemStylePlain target:self action:@selector(insertVersionDot:)];
+            UIBarButtonItem *space = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil];
+            UIBarButtonItem *done = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(dismissVersionKeyboard)];
+            toolbar.items = @[space, dot, space, done]; field.inputAccessoryView = toolbar; field.tag = 7312;
         }];
         [input addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
         [input addAction:[UIAlertAction actionWithTitle:@"Apply" style:UIAlertActionStyleDefault handler:^(UIAlertAction *apply) {
@@ -473,26 +478,60 @@
     [self presentViewController:alert animated:YES completion:nil];
 }
 - (NSString *)modsDirectoryForSelectedProfile {
-    NSString *home = NSHomeDirectory();
-    NSString *bundlePath = NSBundle.mainBundle.bundlePath ?: @"";
-    NSRange documentsRange = [bundlePath rangeOfString:@"/Documents/" options:NSCaseInsensitiveSearch];
-    NSDictionary *environment = NSProcessInfo.processInfo.environment;
-    BOOL liveContainer = documentsRange.location != NSNotFound;
-    for (NSString *key in environment) {
-        NSString *lowerKey = key.lowercaseString;
-        if ([lowerKey containsString:@"livecontainer"] || [lowerKey isEqualToString:@"lc_container"]) { liveContainer = YES; break; }
+    // Match the exact directory Amethyst passes to Minecraft, including its LiveContainer container.
+    const char *gameDir = getenv("GAME_DIR");
+    if (gameDir && gameDir[0] != '\0') {
+        return [[NSString stringWithUTF8String:gameDir] stringByAppendingPathComponent:@"mods"];
     }
-    NSString *base = home;
-    if (liveContainer) {
-        if (documentsRange.location != NSNotFound) {
-            NSString *containerRoot = [bundlePath substringToIndex:documentsRange.location];
-            base = [containerRoot stringByAppendingPathComponent:@"Documents"];
-        } else {
-            base = [home stringByAppendingPathComponent:@"Documents"];
-        }
-    }
-    return [[base stringByAppendingPathComponent:@"Library/Application Support/minecraft"] stringByAppendingPathComponent:@"mods"];
+    NSString *applicationSupport = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support"];
+    return [[applicationSupport stringByAppendingPathComponent:@"minecraft"] stringByAppendingPathComponent:@"mods"];
 }
+- (void)insertVersionDot:(UIBarButtonItem *)sender {
+    UITextField *field = nil;
+    for (UIView *view in self.presentedViewController.view.subviews) {
+        if ([view isKindOfClass:UITextField.class] && ((UITextField *)view).tag == 7312) field = (UITextField *)view;
+        for (UIView *child in view.subviews) if ([child isKindOfClass:UITextField.class] && ((UITextField *)child).tag == 7312) field = (UITextField *)child;
+    }
+    if (field) [field replaceRange:field.selectedTextRange withText:@"."];
+}
+- (void)dismissVersionKeyboard { [self.presentedViewController.view endEditing:YES]; }
+- (void)showInstalledMods {
+    NSString *directory = [self modsDirectoryForSelectedProfile];
+    NSError *error = nil;
+    NSArray<NSString *> *files = [NSFileManager.defaultManager contentsOfDirectoryAtPath:directory error:&error];
+    if (error) { [self showMessage:[NSString stringWithFormat:@"Could not read mods folder:\n%@\n\nPath: %@", error.localizedDescription, directory] title:@"Manage Mods"]; return; }
+    NSMutableArray<NSString *> *mods = [NSMutableArray array];
+    for (NSString *name in files) {
+        NSString *lower = name.lowercaseString;
+        if ([lower hasSuffix:@".jar"] || [lower hasSuffix:@".jar.disabled"]) [mods addObject:name];
+    }
+    if (!mods.count) { [self showMessage:[NSString stringWithFormat:@"No mod JARs found.\n\nFolder checked:\n%@", directory] title:@"Manage Mods"]; return; }
+    UIAlertController *list = [UIAlertController alertControllerWithTitle:@"Installed Mods" message:directory preferredStyle:UIAlertControllerStyleActionSheet];
+    for (NSString *name in mods) {
+        BOOL disabled = [name.lowercaseString hasSuffix:@".jar.disabled"];
+        [list addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"%@ — %@", disabled ? @"Enable" : @"Disable", name] style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+            NSString *from = [directory stringByAppendingPathComponent:name];
+            NSString *toName = disabled ? [name substringToIndex:name.length - @".disabled".length] : [name stringByAppendingString:@".disabled"];
+            NSError *moveError = nil;
+            if (![NSFileManager.defaultManager moveItemAtPath:from toPath:[directory stringByAppendingPathComponent:toName] error:&moveError]) [self showMessage:moveError.localizedDescription title:@"Could not change mod state"];
+            else [self showInstalledMods];
+        }]];
+        [list addAction:[UIAlertAction actionWithTitle:[@"Delete " stringByAppendingString:name] style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+            UIAlertController *confirm = [UIAlertController alertControllerWithTitle:@"Delete mod?" message:name preferredStyle:UIAlertControllerStyleAlert];
+            [confirm addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+            [confirm addAction:[UIAlertAction actionWithTitle:@"Delete" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *confirmAction) {
+                NSError *removeError = nil;
+                if (![NSFileManager.defaultManager removeItemAtPath:[directory stringByAppendingPathComponent:name] error:&removeError]) [self showMessage:removeError.localizedDescription title:@"Could not delete mod"];
+                else [self showInstalledMods];
+            }]];
+            [self presentViewController:confirm animated:YES completion:nil];
+        }]];
+    }
+    [list addAction:[UIAlertAction actionWithTitle:@"Done" style:UIAlertActionStyleCancel handler:nil]];
+    if (list.popoverPresentationController) list.popoverPresentationController.barButtonItem = self.navigationItem.leftBarButtonItem;
+    [self presentViewController:list animated:YES completion:nil];
+}
+
 - (void)downloadVersion:(NSDictionary *)version project:(NSDictionary *)project {
     NSDictionary *file = nil;
     NSArray *files = [version[@"files"] isKindOfClass:NSArray.class] ? version[@"files"] : @[];
