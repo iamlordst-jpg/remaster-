@@ -522,13 +522,19 @@
             continue;
         }
         dispatch_group_enter(group);
-        NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"https://api.modrinth.com/v2/project/%@", projectID]];
+        BOOL curseForge = [project[@"source"] isEqual:@"curseforge"];
+        NSURL *url = [NSURL URLWithString:curseForge
+            ? [NSString stringWithFormat:@"https://api.curseforge.com/v1/mods/%@", projectID]
+            : [NSString stringWithFormat:@"https://api.modrinth.com/v2/project/%@", projectID]];
         NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
         request.timeoutInterval = 12;
-        [request setValue:@"Amethyst-iOS-ModBrowser/1.1" forHTTPHeaderField:@"User-Agent"];
+        [request setValue:@"Amethyst-iOS-ModBrowser/1.2" forHTTPHeaderField:@"User-Agent"];
+        if (curseForge) [request setValue:self.curseForgeAPIKey ?: @"" forHTTPHeaderField:@"x-api-key"];
         [[NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
             NSDictionary *json = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
-            NSString *name = [json[@"title"] isKindOfClass:NSString.class] ? json[@"title"] : projectID;
+            NSDictionary *dependencyInfo = curseForge && [json[@"data"] isKindOfClass:NSDictionary.class] ? json[@"data"] : json;
+            NSString *name = [dependencyInfo[@"title"] isKindOfClass:NSString.class] ? dependencyInfo[@"title"] :
+                ([dependencyInfo[@"name"] isKindOfClass:NSString.class] ? dependencyInfo[@"name"] : projectID);
             @synchronized (lines) { [lines addObject:[NSString stringWithFormat:@"%@: %@", type.capitalizedString, name]]; }
             dispatch_group_leave(group);
         }] resume];
