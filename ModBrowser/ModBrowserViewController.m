@@ -687,36 +687,11 @@
     [self presentViewController:alert animated:YES completion:nil];
 }
 - (NSString *)modsDirectoryForSelectedProfile {
-    NSFileManager *fm = NSFileManager.defaultManager;
-
-    // LiveContainer's Files-visible Minecraft data directory:
-    // <app container>/Documents/library/application support/minecraft/
-    // Prefer it only when it looks like a real Minecraft root, not just an empty folder.
-    NSString *containerMinecraft = [[NSHomeDirectory()
-        stringByAppendingPathComponent:@"Documents/library/application support/minecraft"]
-        stringByStandardizingPath];
-    BOOL hasVersions = [fm fileExistsAtPath:[containerMinecraft stringByAppendingPathComponent:@"versions"]];
-    BOOL hasAssets = [fm fileExistsAtPath:[containerMinecraft stringByAppendingPathComponent:@"assets"]];
-    BOOL hasLibraries = [fm fileExistsAtPath:[containerMinecraft stringByAppendingPathComponent:@"libraries"]];
-    if (hasVersions && hasAssets && hasLibraries) {
-        return [containerMinecraft stringByAppendingPathComponent:@"mods"];
-    }
-
-    // Otherwise match JavaLauncher.m: AME_HOME/instances/<group>/<profile gameDir>.
-    const char *home = getenv("AME_HOME");
-    if (home && home[0] != '\0') {
-        NSString *instanceGroup = getPrefObject(@"general.game_directory");
-        if (![instanceGroup isKindOfClass:NSString.class] || !instanceGroup.length) instanceGroup = @"default";
-        NSString *profileGameDir = [PLProfiles resolveKeyForCurrentProfile:@"gameDir"];
-        if (![profileGameDir isKindOfClass:NSString.class] || !profileGameDir.length) profileGameDir = @".";
-        NSString *gameDirectory = [[[NSString stringWithUTF8String:home]
-            stringByAppendingPathComponent:[NSString stringWithFormat:@"instances/%@/%@", instanceGroup, profileGameDir]]
-            stringByStandardizingPath];
-        return [gameDirectory stringByAppendingPathComponent:@"mods"];
-    }
-
-    // Last-resort fallback for builds without Amethyst's normal environment.
-    return [[NSHomeDirectory() stringByAppendingPathComponent:@"Documents/AmethystMods"] stringByAppendingPathComponent:@""];
+    // Dedicated folder visible in Files as:
+    // On My iPhone > LiveContainer > data > application > <container UUID> > Documents > ST Mod Browser
+    // Keep it directly inside Documents, not inside Minecraft's folders.
+    return [[NSHomeDirectory() stringByAppendingPathComponent:@"Documents/ST Mod Browser"]
+        stringByAppendingPathComponent:@"mods"];
 }
 - (void)insertVersionDot:(UIBarButtonItem *)sender {
     UITextField *field = self.customVersionField;
