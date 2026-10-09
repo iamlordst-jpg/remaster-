@@ -173,7 +173,7 @@
     NSString *channel = version[@"version_type"] ?: @"release";
     cell.detailTextLabel.text = [NSString stringWithFormat:@"%@  •  %@\n%@  •  %@",
         [gameVersions componentsJoinedByString:@", "],
-        [[version[@"loaders"] isKindOfClass:NSArray.class] ? version[@"loaders"] : @[self.loader] componentsJoinedByString:@", "],
+        [( [version[@"loaders"] isKindOfClass:NSArray.class] ? version[@"loaders"] : @[self.loader] ) componentsJoinedByString:@", "],
         channel.capitalizedString, date];
     if (indexPath.row >= self.versions.count - 3) [self loadNextPage];
     return cell;
@@ -414,7 +414,7 @@
     __weak typeof(self) weakSelf = self;
     versions.versionSelected = ^(NSDictionary *version) {
         __strong typeof(weakSelf) self = weakSelf;
-        if (self) [self showDetailsForVersion:version project:project];
+        if (self) [self dismissViewControllerAnimated:YES completion:^{ [self showDetailsForVersion:version project:project]; }];
     };
     UINavigationController *navigation = [[UINavigationController alloc] initWithRootViewController:versions];
     navigation.modalPresentationStyle = UIModalPresentationPageSheet;
