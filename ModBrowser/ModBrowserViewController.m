@@ -262,54 +262,83 @@
 }
 - (void)searchForProjectsReset:(BOOL)reset {
     if (reset) {
-        [self.searchTask cancel];
-        self.loading = NO;
-        self.searchGeneration += 1;
-        self.offset = 0;
-        self.totalHits = NSIntegerMax;
-        [self.projects removeAllObjects];
-    } else if (self.loading) {
-        return;
-    }
+        [self.searchTask cancel]; self.loading = NO; self.searchGeneration += 1;
+        self.offset = 0; self.totalHits = NSIntegerMax; [self.projects removeAllObjects];
+    } else if (self.loading) return;
     NSUInteger generation = self.searchGeneration;
-    self.loading = YES;
-    [self.activity startAnimating];
-    self.tableView.tableFooterView = self.activity;
-    [self.tableView reloadData];
+    self.loading = YES; [self.activity startAnimating]; self.tableView.tableFooterView = self.activity; [self.tableView reloadData];
 
-    NSMutableArray<NSArray<NSString *> *> *facetGroups = [NSMutableArray arrayWithObject:@[@"project_type:mod"]];
-    [facetGroups addObject:@[[NSString stringWithFormat:@"categories:%@", self.loader]]];
-    if (self.minecraftVersion.length) [facetGroups addObject:@[[NSString stringWithFormat:@"versions:%@", self.minecraftVersion]]];
-    NSData *facetData = [NSJSONSerialization dataWithJSONObject:facetGroups options:0 error:nil];
-    NSString *facets = [[NSString alloc] initWithData:facetData encoding:NSUTF8StringEncoding] ?: @"[[\"project_type:mod\"],[\"categories:fabric\"]]";
-    NSArray *items = @[
-        [NSURLQueryItem queryItemWithName:@"query" value:self.query ?: @""],
-        [NSURLQueryItem queryItemWithName:@"limit" value:@"20"],
-        [NSURLQueryItem queryItemWithName:@"offset" value:[NSString stringWithFormat:@"%ld", (long)self.offset]],
-        [NSURLQueryItem queryItemWithName:@"index" value:@"relevance"],
-        [NSURLQueryItem queryItemWithName:@"facets" value:facets]
-    ];
-    NSURL *url = [self URLForPath:@"/search" queryItems:items];
-    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
-    request.timeoutInterval = 25;
-    [request setValue:@"Amethyst-iOS-ModBrowser/1.1" forHTTPHeaderField:@"User-Agent"];
+    NSMutableURLRequest *request = nil;
+    if (self.curseForgeSource) {
+        if (!self.curseForgeAPIKey.length) { self.loading = NO; [self.activity stopAnimating]; [self promptForCurseForgeKeyThenSearch]; return; }
+        NSMutableArray<NSURLQueryItem *> *items = [NSMutableArray arrayWithObjects:
+            [NSURLQueryItem queryItemWithName:@"gameId" value:@"432"],
+            [NSURLQueryItem queryItemWithName:@"classId" value:@"6"],
+            [NSURLQueryItem queryItemWithName:@"searchFilter" value:self.query ?: @""],
+            [NSURLQueryItem queryItemWithName:@"pageSize" value:@"20"],
+            [NSURLQueryItem queryItemWithName:@"index" value:[NSString stringWithFormat:@"%ld", (long)self.offset]],
+            [NSURLQueryItem queryItemWithName:@"sortField" value:@"2"],
+            [NSURLQueryItem queryItemWithName:@"sortOrder" value:@"desc"], nil];
+        NSDictionary *loaderIDs = @{@"forge":@"1", @"fabric":@"4", @"quilt":@"5", @"neoforge":@"6"};
+        [items addObject:[NSURLQueryItem queryItemWithName:@"modLoaderType" value:loaderIDs[self.loader] ?: @"1"]];
+        if (self.minecraftVersion.length) [items addObject:[NSURLQueryItem queryItemWithName:@"gameVersion" value:self.minecraftVersion]];
+        NSURLComponents *components = [NSURLComponents componentsWithString:@"https://api.curseforge.com/v1/mods/search"];
+        components.queryItems = items;
+        request = [NSMutableURLRequest requestWithURL:components.URL];
+        [request setValue:self.curseForgeAPIKey forHTTPHeaderField:@"x-api-key"];
+    } else {
+        NSMutableArray<NSArray<NSString *> *> *facetGroups = [NSMutableArray arrayWithObject:@[@"project_type:mod"]];
+        [facetGroups addObject:@[[NSString stringWithFormat:@"categories:%@", self.loader]]];
+        if (self.minecraftVersion.length) [facetGroups addObject:@[[NSString stringWithFormat:@"versions:%@", self.minecraftVersion]]];
+        NSData *facetData = [NSJSONSerialization dataWithJSONObject:facetGroups options:0 error:nil];
+        NSString *facets = [[NSString alloc] initWithData:facetData encoding:NSUTF8StringEncoding] ?: @"[[\"project_type:mod\"],[\"categories:fabric\"]]";
+        NSArray *items = @[
+            [NSURLQueryItem queryItemWithName:@"query" value:self.query ?: @""],
+            [NSURLQueryItem queryItemWithName:@"limit" value:@"20"],
+            [NSURLQueryItem queryItemWithName:@"offset" value:[NSString stringWithFormat:@"%ld", (long)self.offset]],
+            [NSURLQueryItem queryItemWithName:@"index" value:@"relevance"],
+            [NSURLQueryItem queryItemWithName:@"facets" value:facets]
+        ];
+        request = [NSMutableURLRequest requestWithURL:[self URLForPath:@"/search" queryItems:items]];
+    }
+    request.timeoutInterval = 30;
+    [request setValue:@"Amethyst-iOS-ModBrowser/1.2" forHTTPHeaderField:@"User-Agent"];
     __weak typeof(self) weakSelf = self;
     self.searchTask = [NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         NSDictionary *json = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
         dispatch_async(dispatch_get_main_queue(), ^{
             __strong typeof(weakSelf) self = weakSelf;
             if (!self || generation != self.searchGeneration) return;
-            self.loading = NO;
-            [self.activity stopAnimating];
-            [self.refreshControl endRefreshing];
-            self.tableView.tableFooterView = [[UIView alloc] initWithFrame:CGRectZero];
+            self.loading = NO; [self.activity stopAnimating]; [self.refreshControl endRefreshing]; self.tableView.tableFooterView = [[UIView alloc] initWithFrame:CGRectZero];
+            NSArray *hits = nil;
+            NSInteger total = 0;
+            if (!error && [json isKindOfClass:NSDictionary.class]) {
+                if (self.curseForgeSource) {
+                    hits = [json[@"data"] isKindOfClass:NSArray.class] ? json[@"data"] : @[];
+                    total = [json[@"pagination"][@"totalCount"] integerValue];
+                    NSMutableArray *normalized = [NSMutableArray array];
+                    for (NSDictionary *item in hits) {
+                        NSDictionary *logo = [item[@"logo"] isKindOfClass:NSDictionary.class] ? item[@"logo"] : @{};
+                        [normalized addObject:@{
+                            @"project_id":[item[@"id"] description] ?: @"",
+                            @"title":item[@"name"] ?: @"Untitled mod",
+                            @"description":item[@"summary"] ?: @"",
+                            @"downloads":item[@"downloadCount"] ?: @0,
+                            @"icon_url":logo[@"url"] ?: @"",
+                            @"source":@"curseforge"
+                        }];
+                    }
+                    hits = normalized;
+                } else {
+                    hits = [json[@"hits"] isKindOfClass:NSArray.class] ? json[@"hits"] : @[];
+                    total = [json[@"total_hits"] integerValue];
+                }
+            }
             if (error || ![json isKindOfClass:NSDictionary.class]) {
-                if (!self.projects.count) self.tableView.backgroundView = [self messageView:@"Couldn’t load Modrinth. Check your connection and pull to retry."];
+                if (!self.projects.count) self.tableView.backgroundView = [self messageView:self.curseForgeSource ? @"Couldn’t load CurseForge. Check the API key and connection, then pull to retry." : @"Couldn’t load Modrinth. Check your connection and pull to retry."];
             } else {
-                NSArray *hits = [json[@"hits"] isKindOfClass:NSArray.class] ? json[@"hits"] : @[];
-                [self.projects addObjectsFromArray:hits];
-                self.totalHits = [json[@"total_hits"] integerValue];
-                self.offset = self.projects.count;
+                [self.projects addObjectsFromArray:hits ?: @[]];
+                self.totalHits = total; self.offset = self.projects.count;
                 self.tableView.backgroundView = self.projects.count ? nil : [self messageView:@"No mods found. Try another search or change your loader/version filters."];
             }
             [self.tableView reloadData];
@@ -317,6 +346,7 @@
     }];
     [self.searchTask resume];
 }
+
 - (UIView *)messageView:(NSString *)message {
     UILabel *label = [[UILabel alloc] initWithFrame:self.tableView.bounds];
     label.text = message;
