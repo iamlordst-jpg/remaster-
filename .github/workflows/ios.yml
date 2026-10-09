@@ -25,8 +25,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@main
 
-      - name: Checkout repository submodules
-        run: git submodule update --init --recursive
+      - name: Checkout iOS submodule only
+        # This workflow builds an iOS IPA; recursively checking out the root
+        # submodules also clones Amethyst-Android and its SSH-only dependencies.
+        run: |
+          git submodule update --init Amethyst-iOS
+          git -C Amethyst-iOS submodule sync
+          git -C Amethyst-iOS submodule update --init --recursive
 
       - name: Get gl4es latest commit hash
         id: gl4es-sha
