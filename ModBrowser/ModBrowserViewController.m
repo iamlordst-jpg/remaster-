@@ -214,8 +214,8 @@
         NSTextCheckingResult *match = [pattern firstMatchInString:profileVersion options:0 range:NSMakeRange(0, profileVersion.length)];
         if (match) self.minecraftVersion = [profileVersion substringWithRange:match.range];
         NSString *lowerProfile = profileVersion.lowercaseString;
-        if ([lowerProfile containsString:@"forge"]) self.loader = @"forge";
-        else if ([lowerProfile containsString:@"neoforge"]) self.loader = @"neoforge";
+        if ([lowerProfile containsString:@"neoforge"]) self.loader = @"neoforge";
+        else if ([lowerProfile containsString:@"forge"]) self.loader = @"forge";
         else if ([lowerProfile containsString:@"quilt"]) self.loader = @"quilt";
         else if ([lowerProfile containsString:@"fabric"]) self.loader = @"fabric";
     }
