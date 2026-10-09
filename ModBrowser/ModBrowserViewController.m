@@ -171,10 +171,10 @@
     NSString *date = version[@"date_published"] ?: @"";
     if (date.length >= 10) date = [date substringToIndex:10];
     NSString *channel = version[@"version_type"] ?: @"release";
+    NSArray *loaders = [version[@"loaders"] isKindOfClass:NSArray.class] ? version[@"loaders"] : @[self.loader];
+    NSString *loaderText = [loaders componentsJoinedByString:@", "];
     cell.detailTextLabel.text = [NSString stringWithFormat:@"%@  •  %@\n%@  •  %@",
-        [gameVersions componentsJoinedByString:@", "],
-        [( [version[@"loaders"] isKindOfClass:NSArray.class] ? version[@"loaders"] : @[self.loader] ) componentsJoinedByString:@", "],
-        channel.capitalizedString, date];
+        [gameVersions componentsJoinedByString:@", "], loaderText, channel.capitalizedString, date];
     if (indexPath.row >= self.versions.count - 3) [self loadNextPage];
     return cell;
 }
