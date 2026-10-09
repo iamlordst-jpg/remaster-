@@ -325,6 +325,10 @@
 @property(nonatomic) NSURLSessionDataTask *searchTask;
 @property(nonatomic) UIActivityIndicatorView *activity;
 @property(nonatomic) NSCache<NSString *, UIImage *> *iconCache;
+@property(nonatomic) UISegmentedControl *sourceControl;
+@property(nonatomic) BOOL curseForgeSource;
+@property(nonatomic) NSString *curseForgeAPIKey;
+@property(nonatomic) UITextField *customVersionField;
 @end
 
 @implementation ModBrowserViewController
@@ -363,11 +367,49 @@
     self.searchController.obscuresBackgroundDuringPresentation = NO;
     self.searchController.searchBar.placeholder = @"Search Modrinth mods";
     self.navigationItem.searchController = self.searchController;
+    self.curseForgeAPIKey = [[NSUserDefaults standardUserDefaults] stringForKey:@"AmethystCurseForgeAPIKey"] ?: @"";
+    self.sourceControl = [[UISegmentedControl alloc] initWithItems:@[@"Modrinth", @"CurseForge"]];
+    self.sourceControl.selectedSegmentIndex = 0;
+    [self.sourceControl addTarget:self action:@selector(sourceChanged:) forControlEvents:UIControlEventValueChanged];
+    self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Manage Mods" style:UIBarButtonItemStylePlain target:self action:@selector(showInstalledMods)];
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"slider.horizontal.3"] style:UIBarButtonItemStylePlain target:self action:@selector(showFilters)];
     self.definesPresentationContext = YES;
     self.activity = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
     self.tableView.tableFooterView = [[UIView alloc] initWithFrame:CGRectZero];
+    [self layoutSourceControl];
     [self searchForProjectsReset:YES];
+}
+
+- (void)viewDidLayoutSubviews { [super viewDidLayoutSubviews]; [self layoutSourceControl]; }
+- (void)layoutSourceControl {
+    CGFloat width = self.tableView.bounds.size.width;
+    UIView *header = self.tableView.tableHeaderView;
+    if (!header || ![header.subviews containsObject:self.sourceControl]) {
+        header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, width, 52)];
+        self.sourceControl.frame = CGRectMake(16, 8, MAX(0, width - 32), 36);
+        [header addSubview:self.sourceControl];
+        self.tableView.tableHeaderView = header;
+    } else {
+        header.frame = CGRectMake(0, 0, width, 52);
+        self.sourceControl.frame = CGRectMake(16, 8, MAX(0, width - 32), 36);
+    }
+}
+- (void)sourceChanged:(UISegmentedControl *)sender {
+    self.curseForgeSource = sender.selectedSegmentIndex == 1;
+    self.searchController.searchBar.placeholder = self.curseForgeSource ? @"Search CurseForge mods" : @"Search Modrinth mods";
+    if (self.curseForgeSource && !self.curseForgeAPIKey.length) [self promptForCurseForgeKeyThenSearch];
+    else [self searchForProjectsReset:YES];
+}
+- (void)promptForCurseForgeKeyThenSearch {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"CurseForge API key required" message:@"CurseForge requires an API key. It is stored locally on this device." preferredStyle:UIAlertControllerStyleAlert];
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *field) { field.placeholder = @"CurseForge API key"; field.secureTextEntry = YES; field.autocorrectionType = UITextAutocorrectionTypeNo; }];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(UIAlertAction *action) { self.sourceControl.selectedSegmentIndex = 0; self.curseForgeSource = NO; }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Save" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        NSString *key = [alert.textFields.firstObject.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        if (key.length) { self.curseForgeAPIKey = key; [[NSUserDefaults standardUserDefaults] setObject:key forKey:@"AmethystCurseForgeAPIKey"]; [self searchForProjectsReset:YES]; }
+        else { self.sourceControl.selectedSegmentIndex = 0; self.curseForgeSource = NO; }
+    }]];
+    [self presentViewController:alert animated:YES completion:nil];
 }
 
 - (void)updateSearchResultsForSearchController:(UISearchController *)searchController {
