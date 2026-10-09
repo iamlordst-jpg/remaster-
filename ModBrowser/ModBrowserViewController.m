@@ -213,6 +213,11 @@
         NSRegularExpression *pattern = [NSRegularExpression regularExpressionWithPattern:@"\\d+\\.\\d+(?:\\.\\d+)?" options:0 error:nil];
         NSTextCheckingResult *match = [pattern firstMatchInString:profileVersion options:0 range:NSMakeRange(0, profileVersion.length)];
         if (match) self.minecraftVersion = [profileVersion substringWithRange:match.range];
+        NSString *lowerProfile = profileVersion.lowercaseString;
+        if ([lowerProfile containsString:@"forge"]) self.loader = @"forge";
+        else if ([lowerProfile containsString:@"neoforge"]) self.loader = @"neoforge";
+        else if ([lowerProfile containsString:@"quilt"]) self.loader = @"quilt";
+        else if ([lowerProfile containsString:@"fabric"]) self.loader = @"fabric";
     }
     return self;
 }
@@ -388,7 +393,10 @@
                     CGSize target = CGSizeMake(96, 96);
                     UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:target];
                     UIImage *thumbnail = [renderer imageWithActions:^(UIGraphicsImageRendererContext *context) {
-                        [image drawInRect:CGRectMake(0, 0, target.width, target.height)];
+                        CGFloat scale = MIN(target.width / MAX(image.size.width, 1), target.height / MAX(image.size.height, 1));
+                        CGSize fitted = CGSizeMake(image.size.width * scale, image.size.height * scale);
+                        CGRect rect = CGRectMake((target.width - fitted.width) / 2.0, (target.height - fitted.height) / 2.0, fitted.width, fitted.height);
+                        [image drawInRect:rect];
                     }];
                     [self.iconCache setObject:thumbnail forKey:projectID];
                     dispatch_async(dispatch_get_main_queue(), ^{
