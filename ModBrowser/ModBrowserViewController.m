@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #import "ModBrowserViewController.h"
 #import "PLProfiles.h"
+#import "LauncherPreferences.h"
 
 @interface ModProjectCell : UITableViewCell
 @property(nonatomic) UIImageView *modIcon;
@@ -686,13 +687,23 @@
     [self presentViewController:alert animated:YES completion:nil];
 }
 - (NSString *)modsDirectoryForSelectedProfile {
-    // Match the exact directory Amethyst passes to Minecraft, including its LiveContainer container.
-    const char *gameDir = getenv("GAME_DIR");
-    if (gameDir && gameDir[0] != '\0') {
-        return [[NSString stringWithUTF8String:gameDir] stringByAppendingPathComponent:@"mods"];
+    // Match JavaLauncher.m exactly: Minecraft runs from
+    // AME_HOME/instances/<general.game_directory>/<selected profile's gameDir>.
+    // GAME_DIR is not the selected profile's actual runtime directory.
+    const char *home = getenv("AME_HOME");
+    if (home && home[0] != '\0') {
+        NSString *instanceGroup = getPrefObject(@"general.game_directory");
+        if (![instanceGroup isKindOfClass:NSString.class] || !instanceGroup.length) instanceGroup = @"default";
+        NSString *profileGameDir = [PLProfiles resolveKeyForCurrentProfile:@"gameDir"];
+        if (![profileGameDir isKindOfClass:NSString.class] || !profileGameDir.length) profileGameDir = @".";
+        NSString *gameDirectory = [[[NSString stringWithUTF8String:home]
+            stringByAppendingPathComponent:[NSString stringWithFormat:@"instances/%@/%@", instanceGroup, profileGameDir]]
+            stringByStandardizingPath];
+        return [gameDirectory stringByAppendingPathComponent:@"mods"];
     }
-    NSString *applicationSupport = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support"];
-    return [[applicationSupport stringByAppendingPathComponent:@"minecraft"] stringByAppendingPathComponent:@"mods"];
+
+    // Last-resort fallback for builds without Amethyst's normal environment.
+    return [[NSHomeDirectory() stringByAppendingPathComponent:@"Documents/AmethystMods"] stringByAppendingPathComponent:@""];
 }
 - (void)insertVersionDot:(UIBarButtonItem *)sender {
     UITextField *field = self.customVersionField;
