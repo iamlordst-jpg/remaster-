@@ -475,13 +475,22 @@
 - (NSString *)modsDirectoryForSelectedProfile {
     NSString *home = NSHomeDirectory();
     NSString *bundlePath = NSBundle.mainBundle.bundlePath ?: @"";
+    NSRange documentsRange = [bundlePath rangeOfString:@"/Documents/" options:NSCaseInsensitiveSearch];
     NSDictionary *environment = NSProcessInfo.processInfo.environment;
-    BOOL liveContainer = [bundlePath rangeOfString:@"/Documents/" options:NSCaseInsensitiveSearch].location != NSNotFound;
+    BOOL liveContainer = documentsRange.location != NSNotFound;
     for (NSString *key in environment) {
         NSString *lowerKey = key.lowercaseString;
         if ([lowerKey containsString:@"livecontainer"] || [lowerKey isEqualToString:@"lc_container"]) { liveContainer = YES; break; }
     }
-    NSString *base = liveContainer ? [home stringByAppendingPathComponent:@"Documents"] : home;
+    NSString *base = home;
+    if (liveContainer) {
+        if (documentsRange.location != NSNotFound) {
+            NSString *containerRoot = [bundlePath substringToIndex:documentsRange.location];
+            base = [containerRoot stringByAppendingPathComponent:@"Documents"];
+        } else {
+            base = [home stringByAppendingPathComponent:@"Documents"];
+        }
+    }
     return [[base stringByAppendingPathComponent:@"Library/Application Support/minecraft"] stringByAppendingPathComponent:@"mods"];
 }
 - (void)downloadVersion:(NSDictionary *)version project:(NSDictionary *)project {
