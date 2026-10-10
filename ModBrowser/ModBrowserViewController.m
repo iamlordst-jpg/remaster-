@@ -1,7 +1,6 @@
 #include <stdlib.h>
 #import "ModBrowserViewController.h"
 #import "PLProfiles.h"
-#import <ImageIO/ImageIO.h>
 
 
 @interface STDownloadCoordinator : NSObject <NSURLSessionDownloadDelegate>
@@ -1487,22 +1486,7 @@
                 NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url cachePolicy:(iconCachingEnabled ? NSURLRequestReturnCacheDataElseLoad : NSURLRequestReloadIgnoringLocalCacheData) timeoutInterval:18];
                 [request setValue:@"Amethyst-iOS-ModBrowser/1.4" forHTTPHeaderField:@"User-Agent"];
                 NSURLSessionDataTask *task = [self.iconSession dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-                    UIImage *thumbnail = nil;
-                    if (data.length && !error) {
-                        CGImageSourceRef source = CGImageSourceCreateWithData((__bridge CFDataRef)data, NULL);
-                        if (source) {
-                            NSDictionary *options = @{(NSString *)kCGImageSourceCreateThumbnailFromImageAlways:@YES,
-                                                      (NSString *)kCGImageSourceThumbnailMaxPixelSize:@192,
-                                                      (NSString *)kCGImageSourceCreateThumbnailWithTransform:@YES,
-                                                      (NSString *)kCGImageSourceShouldCacheImmediately:@YES};
-                            CGImageRef cgThumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, (__bridge CFDictionaryRef)options);
-                            if (cgThumbnail) {
-                                thumbnail = [UIImage imageWithCGImage:cgThumbnail scale:UIScreen.mainScreen.scale orientation:UIImageOrientationUp];
-                                CGImageRelease(cgThumbnail);
-                            }
-                            CFRelease(source);
-                        }
-                    }
+                    UIImage *thumbnail = (data.length && !error) ? [UIImage imageWithData:data] : nil;
                     if (thumbnail && [weakSelf iconCachingEnabled]) {
                         NSData *jpeg = UIImageJPEGRepresentation(thumbnail, 0.82);
                         if (jpeg.length) [jpeg writeToFile:diskPath options:NSDataWritingAtomic error:nil];
