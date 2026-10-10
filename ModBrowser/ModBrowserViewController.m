@@ -275,7 +275,7 @@
     } else {
         NSString *name = [[self collections].allKeys sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)][indexPath.row];
         cell.textLabel.text = name;
-        cell.detailTextLabel.text = [NSString stringWithFormat:@"%lu saved projects", (unsigned long)[self collections][name].count];
+        cell.detailTextLabel.text = [NSString stringWithFormat:@"%lu saved projects", (unsigned long)[[self collections][name] count]];
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     }
     cell.textLabel.numberOfLines = 2; cell.detailTextLabel.numberOfLines = 2;
