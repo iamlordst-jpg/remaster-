@@ -10,6 +10,8 @@
 @property(nonatomic) UILabel *descriptionLabel;
 @property(nonatomic) UILabel *downloadsLabel;
 @property(nonatomic) NSString *projectID;
+@property(nonatomic) BOOL stCardStyle;
+@property(nonatomic) BOOL stDarkCardStyle;
 @end
 
 @implementation ModProjectCell
@@ -56,8 +58,28 @@
     ]];
     return self;
 }
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    if (self.stCardStyle) {
+        if (!self.backgroundView) self.backgroundView = [[UIView alloc] initWithFrame:self.bounds];
+        self.backgroundView.frame = CGRectInset(self.bounds, 12, 4);
+        self.backgroundView.layer.cornerRadius = 14;
+        self.backgroundView.layer.masksToBounds = YES;
+        self.backgroundView.backgroundColor = self.stDarkCardStyle
+            ? [UIColor colorWithRed:0.075 green:0.06 blue:0.12 alpha:1.0]
+            : UIColor.secondarySystemGroupedBackgroundColor;
+        self.backgroundColor = UIColor.clearColor;
+        self.contentView.backgroundColor = UIColor.clearColor;
+    } else {
+        self.backgroundView = nil;
+        self.backgroundColor = nil;
+        self.contentView.backgroundColor = nil;
+    }
+}
 - (void)prepareForReuse {
     [super prepareForReuse];
+    self.stCardStyle = NO;
+    self.stDarkCardStyle = NO;
     self.modIcon.image = [UIImage systemImageNamed:@"shippingbox"];
     self.projectID = nil;
     self.nameLabel.text = nil;
@@ -838,6 +860,7 @@
     if ([self isSTLauncherMode]) {
         NSString *appearance = [[NSUserDefaults standardUserDefaults] stringForKey:@"STLauncherAppearance"] ?: @"system";
         self.overrideUserInterfaceStyle = [self isDarkBrowserAppearance] ? UIUserInterfaceStyleDark : ([appearance isEqualToString:@"light"] ? UIUserInterfaceStyleLight : UIUserInterfaceStyleUnspecified);
+        self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
         if ([self isExperimentalUIEnabled]) {
             self.tableView.backgroundColor = [UIColor colorWithRed:0.045 green:0.035 blue:0.075 alpha:1.0];
             self.tableView.separatorColor = [UIColor colorWithWhite:1.0 alpha:0.09];
@@ -851,6 +874,7 @@
         [self.tableView reloadData];
     } else {
         self.overrideUserInterfaceStyle = UIUserInterfaceStyleUnspecified;
+        self.tableView.separatorStyle = UITableViewCellSeparatorStyleSingleLine;
         self.tableView.backgroundColor = nil;
         self.tableView.separatorColor = nil;
         self.navigationController.navigationBar.tintColor = nil;
@@ -1243,9 +1267,11 @@
     NSDictionary *project = self.projects[indexPath.row];
     NSString *projectID = project[@"project_id"] ?: @"";
     cell.projectID = projectID;
+    cell.stCardStyle = [self isSTLauncherMode];
+    cell.stDarkCardStyle = [self isExperimentalUIEnabled];
     if ([self isExperimentalUIEnabled]) {
-        cell.backgroundColor = [UIColor colorWithRed:0.075 green:0.06 blue:0.12 alpha:1.0];
-        cell.contentView.backgroundColor = [UIColor colorWithRed:0.075 green:0.06 blue:0.12 alpha:1.0];
+        cell.backgroundColor = UIColor.clearColor;
+        cell.contentView.backgroundColor = UIColor.clearColor;
         cell.nameLabel.textColor = UIColor.whiteColor;
         cell.descriptionLabel.textColor = [UIColor colorWithWhite:0.76 alpha:1.0];
         cell.downloadsLabel.textColor = [UIColor colorWithWhite:0.58 alpha:1.0];
