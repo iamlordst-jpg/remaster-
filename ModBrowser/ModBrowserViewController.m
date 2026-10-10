@@ -1350,7 +1350,8 @@
     NSString *message = [NSString stringWithFormat:@"%@\nMinecraft: %@\nLoader: %@\n\nDependencies:\n%@", name, [gameVersions componentsJoinedByString:@", "], self.loader.capitalizedString, dependencySummary];
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:project[@"title"] ?: @"Mod details" message:message preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"Back" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:([self.projectType isEqualToString:@"mod"] ? @"Download .jar" : @"Download archive") style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+    NSString *projectType = [project[@"project_type"] isKindOfClass:NSString.class] ? project[@"project_type"] : self.projectType;
+    [alert addAction:[UIAlertAction actionWithTitle:([projectType isEqualToString:@"mod"] ? @"Download .jar" : @"Download archive") style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         [self downloadVersion:version project:project];
     }]];
     [self presentViewController:alert animated:YES completion:nil];
@@ -1377,7 +1378,8 @@
     if (!file) for (NSDictionary *candidate in files) {
         if ([[candidate[@"filename"] lowercaseString] hasSuffix:@".jar"]) { file = candidate; break; }
     }
-    NSString *targetExtension = [self.projectType isEqualToString:@"mod"] ? @".jar" : @".zip";
+    NSString *projectType = [project[@"project_type"] isKindOfClass:NSString.class] ? project[@"project_type"] : self.projectType;
+    NSString *targetExtension = [projectType isEqualToString:@"mod"] ? @".jar" : @".zip";
     if (!file || ![[file[@"filename"] lowercaseString] hasSuffix:targetExtension]) {
         file = nil;
         for (NSDictionary *candidate in files) if ([[candidate[@"filename"] lowercaseString] hasSuffix:targetExtension]) { file = candidate; break; }
@@ -1747,7 +1749,8 @@ static NSString * const STLauncherModeKey = @"STLauncherExperimentalMode";
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = @"STLauncher Settings";
-    self.tableView.rowHeight = 84;
+    self.tableView.rowHeight = UITableViewAutomaticDimension;
+    self.tableView.estimatedRowHeight = 120;
     self.tableView.tableFooterView = [[UIView alloc] initWithFrame:CGRectZero];
     self.appearanceControl = [[UISegmentedControl alloc] initWithItems:@[@"System", @"Light", @"Dark", @"Purple"]];
     self.appearanceControl.tag = 0;
@@ -1766,6 +1769,12 @@ static NSString * const STLauncherModeKey = @"STLauncherExperimentalMode";
     self.connectionCountLabel = [[UILabel alloc] init];
     self.connectionCountLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
     self.connectionCountLabel.textAlignment = NSTextAlignmentRight;
+    [self reloadSettings];
+}
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    NSString *appearance = [[NSUserDefaults standardUserDefaults] stringForKey:@"STLauncherAppearance"] ?: @"system";
+    self.overrideUserInterfaceStyle = [appearance isEqualToString:@"dark"] || [appearance isEqualToString:@"purple"] ? UIUserInterfaceStyleDark : ([appearance isEqualToString:@"light"] ? UIUserInterfaceStyleLight : UIUserInterfaceStyleUnspecified);
     [self reloadSettings];
 }
 - (void)reloadSettings {
@@ -1793,28 +1802,66 @@ static NSString * const STLauncherModeKey = @"STLauncherExperimentalMode";
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"st-settings-cell"];
     if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"st-settings-cell"];
     cell.selectionStyle = UITableViewCellSelectionStyleNone;
-    cell.detailTextLabel.numberOfLines = 0;
+    cell.accessoryView = nil;
+    cell.accessoryType = UITableViewCellAccessoryNone;
+    cell.textLabel.hidden = YES;
+    cell.detailTextLabel.hidden = YES;
+    UIView *oldContainer = [cell.contentView viewWithTag:91827];
+    [oldContainer removeFromSuperview];
+
+    UILabel *title = [[UILabel alloc] init];
+    title.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
+    UILabel *detail = [[UILabel alloc] init];
+    detail.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
+    detail.textColor = UIColor.secondaryLabelColor;
+    detail.numberOfLines = 0;
+    UIStackView *stack = [[UIStackView alloc] init];
+    stack.axis = UILayoutConstraintAxisVertical;
+    stack.spacing = 8;
+    stack.translatesAutoresizingMaskIntoConstraints = NO;
+    UIView *container = [[UIView alloc] init];
+    container.tag = 91827;
+    container.translatesAutoresizingMaskIntoConstraints = NO;
+    [container addSubview:stack];
+    [cell.contentView addSubview:container];
+    [NSLayoutConstraint activateConstraints:@[
+        [container.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:16],
+        [container.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-16],
+        [container.topAnchor constraintEqualToAnchor:cell.contentView.topAnchor constant:12],
+        [container.bottomAnchor constraintEqualToAnchor:cell.contentView.bottomAnchor constant:-12],
+        [stack.leadingAnchor constraintEqualToAnchor:container.leadingAnchor],
+        [stack.trailingAnchor constraintEqualToAnchor:container.trailingAnchor],
+        [stack.topAnchor constraintEqualToAnchor:container.topAnchor],
+        [stack.bottomAnchor constraintEqualToAnchor:container.bottomAnchor]
+    ]];
+
     if (indexPath.section == 0) {
-        cell.textLabel.text = @"Appearance";
-        cell.detailTextLabel.text = @"Choose System, Light, Dark, or ST's purple theme.";
-        cell.accessoryView = self.appearanceControl;
+        title.text = @"Browser appearance";
+        detail.text = @"Choose System, Light, Dark, or ST's purple browser theme.";
+        [self.appearanceControl.heightAnchor constraintEqualToConstant:32].active = YES;
+        [stack addArrangedSubview:title];
+        [stack addArrangedSubview:detail];
+        [stack addArrangedSubview:self.appearanceControl];
     } else if (indexPath.section == 1) {
-        cell.textLabel.text = @"Default loader & sorting";
-        cell.detailTextLabel.text = @"Used when opening the STLauncher browser. Filters can still be changed at any time.";
-        UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[self.loaderControl, self.sortControl]];
-        stack.axis = UILayoutConstraintAxisVertical;
-        stack.spacing = 6;
-        stack.frame = CGRectMake(0, 0, 280, 64);
-        cell.accessoryView = stack;
+        title.text = @"Default loader & sorting";
+        detail.text = @"Applied when the STLauncher browser opens. You can still change filters while browsing.";
+        [self.loaderControl.heightAnchor constraintEqualToConstant:32].active = YES;
+        [self.sortControl.heightAnchor constraintEqualToConstant:32].active = YES;
+        [stack addArrangedSubview:title];
+        [stack addArrangedSubview:detail];
+        [stack addArrangedSubview:self.loaderControl];
+        [stack addArrangedSubview:self.sortControl];
     } else {
-        cell.textLabel.text = @"Concurrent connections";
-        cell.detailTextLabel.text = @"Affects concurrent transfers only; it does not make a single server-limited file download faster.";
-        UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[self.connectionCountLabel, self.connectionStepper]];
-        stack.axis = UILayoutConstraintAxisHorizontal;
-        stack.spacing = 8;
+        title.text = @"Concurrent connections";
+        detail.text = @"Controls concurrent transfers only. It cannot make a single server-limited file download faster.";
+        UIStackView *controls = [[UIStackView alloc] initWithArrangedSubviews:@[self.connectionCountLabel, self.connectionStepper]];
+        controls.axis = UILayoutConstraintAxisHorizontal;
+        controls.alignment = UIStackViewAlignmentCenter;
+        controls.spacing = 10;
         [self.connectionCountLabel setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
-        stack.frame = CGRectMake(0, 0, 100, 32);
-        cell.accessoryView = stack;
+        [stack addArrangedSubview:title];
+        [stack addArrangedSubview:detail];
+        [stack addArrangedSubview:controls];
     }
     return cell;
 }
