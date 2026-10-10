@@ -119,10 +119,16 @@ jobs:
                   raise SystemExit("Could not find launcher menu imports")
               source = source.replace(import_marker, import_marker + '#import "ModBrowserViewController.h"\n', 1)
           profiles_marker = '        [LauncherMenuCustomItem vcClass:LauncherProfilesViewController.class],\n'
-          if '[LauncherMenuCustomItem vcClass:ModBrowserViewController.class]' not in source:
+          if '[LauncherMenuCustomItem vcClass:STLauncherModeViewController.class]' not in source:
               if profiles_marker not in source:
                   raise SystemExit("Could not find Profiles menu entry")
-              source = source.replace(profiles_marker, profiles_marker + '        [LauncherMenuCustomItem vcClass:ModBrowserViewController.class],\n', 1)
+              source = source.replace(
+                  profiles_marker,
+                  profiles_marker
+                  + '        [LauncherMenuCustomItem vcClass:STLauncherModeViewController.class],\n'
+                  + '        [LauncherMenuCustomItem vcClass:ModBrowserViewController.class],\n',
+                  1,
+              )
           # The launcher normally forces its account-avatar button onto every
           # selected screen's right navigation item. That overwrites Mod Browser's
           # filters button. Keep the browser's own navigation controls intact.
@@ -131,9 +137,21 @@ jobs:
               raise SystemExit("Could not find account button assignment in LauncherMenuViewController.m")
           source = source.replace(
               account_assignment,
-              '        if (![selected.vcArray[0] isKindOfClass:ModBrowserViewController.class]) {\n'
+              '        if (![selected.vcArray[0] isKindOfClass:ModBrowserViewController.class] && '              '![selected.vcArray[0] isKindOfClass:STLauncherModeViewController.class] && '              '![selected.vcArray[0] isKindOfClass:STLauncherHomeViewController.class] && '              '![selected.vcArray[0] isKindOfClass:STLauncherExperimentalFeaturesViewController.class]) {\n'
               '            selected.vcArray[0].navigationItem.rightBarButtonItem = self.accountBtnItem;\n'
               '        }\n',
+              1,
+          )
+          # Keep the mode selector cached separately when it swaps the content
+          # navigation stack to the experimental home screen.
+          stack_assignment = '            self.options[self.lastSelectedIndex].vcArray = contentNavigationController.viewControllers;\n'
+          if stack_assignment not in source:
+              raise SystemExit("Could not find navigation stack cache assignment")
+          source = source.replace(
+              stack_assignment,
+              '            if (![self.options[self.lastSelectedIndex].vcArray.firstObject isKindOfClass:STLauncherModeViewController.class]) {\n'
+              '                self.options[self.lastSelectedIndex].vcArray = contentNavigationController.viewControllers;\n'
+              '            }\n',
               1,
           )
           menu.write_text(source)
