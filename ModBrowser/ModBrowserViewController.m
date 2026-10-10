@@ -1101,6 +1101,16 @@
     return self;
 }
 
+- (UIBarButtonItem *)centeredIconBarButton:(NSString *)symbolName action:(SEL)action {
+    UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+    button.frame = CGRectMake(0, 0, 44, 44);
+    button.contentHorizontalAlignment = UIControlContentHorizontalAlignmentCenter;
+    button.contentVerticalAlignment = UIControlContentVerticalAlignmentCenter;
+    [button setImage:[UIImage systemImageNamed:symbolName] forState:UIControlStateNormal];
+    button.imageView.contentMode = UIViewContentModeCenter;
+    [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
+    return [[UIBarButtonItem alloc] initWithCustomView:button];
+}
 - (NSString *)imageName { return @"shippingbox"; }
 - (BOOL)advancedSearchEnabled { return [[NSUserDefaults standardUserDefaults] boolForKey:@"ModBrowserAdvancedSearchEnabled"]; }
 - (void)viewWillAppear:(BOOL)animated {
@@ -1131,8 +1141,8 @@
     NSString *initialTypeLabel = [self.projectType isEqualToString:@"resourcepack"] ? @"resource packs" : ([self.projectType isEqualToString:@"shader"] ? @"shaders" : ([self.projectType isEqualToString:@"datapack"] ? @"data packs" : @"mods"));
     self.searchController.searchBar.placeholder = [NSString stringWithFormat:@"Search %@ on Modrinth", initialTypeLabel];
     [self.sourceControl addTarget:self action:@selector(sourceChanged:) forControlEvents:UIControlEventValueChanged];
-    UIBarButtonItem *filtersButton = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"slider.horizontal.3"] style:UIBarButtonItemStylePlain target:self action:@selector(showFilters)];
-    UIBarButtonItem *settingsButton = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"gearshape"] style:UIBarButtonItemStylePlain target:self action:@selector(showModBrowserSettings)];
+    UIBarButtonItem *filtersButton = [self centeredIconBarButton:@"slider.horizontal.3" action:@selector(showFilters)];
+    UIBarButtonItem *settingsButton = [self centeredIconBarButton:@"gearshape" action:@selector(showModBrowserSettings)];
     UIBarButtonItem *downloadsButton = [[UIBarButtonItem alloc] initWithTitle:@"Downloads" style:UIBarButtonItemStylePlain target:self action:@selector(openDownloadManager)];
     self.navigationItem.rightBarButtonItems = @[filtersButton, settingsButton, downloadsButton];
     [[STDownloadCoordinator shared] records];
@@ -1454,6 +1464,58 @@
     [m addAction:[UIAlertAction actionWithTitle:@"Any version" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){self.minecraftVersion=nil;[self searchForProjectsReset:YES];}]];
     [m addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];[self presentFilterMenu:m];
 }
+- (void)requestIconURL:(NSString *)iconURL diskPath:(NSString *)diskPath tableView:(UITableView *)tableView attempt:(NSInteger)attempt {
+    NSURL *url = [NSURL URLWithString:iconURL ?: @""];
+    if (!url || !([url.scheme.lowercaseString isEqualToString:@"https"] || [url.scheme.lowercaseString isEqualToString:@"http"])) return;
+    BOOL useCache = [self iconCachingEnabled];
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url
+        cachePolicy:(useCache ? NSURLRequestReturnCacheDataElseLoad : NSURLRequestReloadIgnoringLocalCacheData)
+        timeoutInterval:18];
+    [request setValue:@"Amethyst-iOS-ModBrowser/1.4" forHTTPHeaderField:@"User-Agent"];
+    __weak typeof(self) weakSelf = self;
+    __block NSURLSessionDataTask *task = nil;
+    task = [self.iconSession dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        NSHTTPURLResponse *http = [response isKindOfClass:NSHTTPURLResponse.class] ? (NSHTTPURLResponse *)response : nil;
+        BOOL validStatus = !http || (http.statusCode >= 200 && http.statusCode < 300);
+        UIImage *image = (data.length && !error && validStatus) ? [UIImage imageWithData:data] : nil;
+        __strong typeof(weakSelf) self = weakSelf;
+        if (!self) return;
+        if (image && [self iconCachingEnabled]) {
+            NSData *jpeg = UIImageJPEGRepresentation(image, 0.82);
+            if (jpeg.length) [jpeg writeToFile:diskPath options:NSDataWritingAtomic error:nil];
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            __strong typeof(weakSelf) self = weakSelf;
+            if (!self) return;
+            if (self.iconTasks[iconURL] == task) [self.iconTasks removeObjectForKey:iconURL];
+            if (!image) {
+                // Retry transient network/server/image-decoding failures instead of leaving a random blank icon.
+                if (attempt < 2 && [self iconTasks][iconURL] == nil) {
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.45 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                        if (![self.iconTasks objectForKey:iconURL]) {
+                            [self requestIconURL:iconURL diskPath:diskPath tableView:tableView attempt:attempt + 1];
+                        }
+                    });
+                }
+                return;
+            }
+            if ([self iconCachingEnabled]) [self.iconCache setObject:image forKey:iconURL];
+            for (ModProjectCell *visible in tableView.visibleCells) {
+                NSIndexPath *visiblePath = [tableView indexPathForCell:visible];
+                if (visiblePath && visiblePath.row < self.projects.count) {
+                    NSDictionary *visibleProject = self.projects[visiblePath.row];
+                    if ([visible.projectID isEqualToString:visibleProject[@"project_id"]] &&
+                        [visibleProject[@"icon_url"] isEqualToString:iconURL]) {
+                        visible.modIcon.image = image;
+                    }
+                }
+            }
+        });
+    }];
+    self.iconTasks[iconURL] = task;
+    [task resume];
+}
+
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return self.projects.count; }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     ModProjectCell *cell = [tableView dequeueReusableCellWithIdentifier:@"modrinth-project"];
@@ -1480,38 +1542,7 @@
             cell.modIcon.image = diskImage;
         }
         if (!self.iconTasks[iconURL]) {
-            NSURL *url = [NSURL URLWithString:iconURL];
-            if (url && ([url.scheme.lowercaseString isEqualToString:@"https"] || [url.scheme.lowercaseString isEqualToString:@"http"])) {
-                __weak typeof(self) weakSelf = self;
-                NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url cachePolicy:(iconCachingEnabled ? NSURLRequestReturnCacheDataElseLoad : NSURLRequestReloadIgnoringLocalCacheData) timeoutInterval:18];
-                [request setValue:@"Amethyst-iOS-ModBrowser/1.4" forHTTPHeaderField:@"User-Agent"];
-                NSURLSessionDataTask *task = [self.iconSession dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-                    UIImage *thumbnail = (data.length && !error) ? [UIImage imageWithData:data] : nil;
-                    if (thumbnail && [weakSelf iconCachingEnabled]) {
-                        NSData *jpeg = UIImageJPEGRepresentation(thumbnail, 0.82);
-                        if (jpeg.length) [jpeg writeToFile:diskPath options:NSDataWritingAtomic error:nil];
-                    }
-                    dispatch_async(dispatch_get_main_queue(), ^{
-                        __strong typeof(weakSelf) self = weakSelf;
-                        if (!self) return;
-                        [self.iconTasks removeObjectForKey:iconURL];
-                        if (!thumbnail) return;
-                        if ([self iconCachingEnabled]) [self.iconCache setObject:thumbnail forKey:iconURL];
-                        for (ModProjectCell *visible in tableView.visibleCells) {
-                            NSIndexPath *visiblePath = [tableView indexPathForCell:visible];
-                            if (visiblePath && visiblePath.row < self.projects.count) {
-                                NSDictionary *visibleProject = self.projects[visiblePath.row];
-                                if ([visible.projectID isEqualToString:visibleProject[@"project_id"]] &&
-                                    [visibleProject[@"icon_url"] isEqualToString:iconURL]) {
-                                    visible.modIcon.image = thumbnail;
-                                }
-                            }
-                        }
-                    });
-                }];
-                self.iconTasks[iconURL] = task;
-                [task resume];
-            }
+            [self requestIconURL:iconURL diskPath:diskPath tableView:tableView attempt:0];
         }
     }
     cell.nameLabel.text = [project[@"title"] isKindOfClass:NSString.class] ? project[@"title"] : @"Untitled project";
