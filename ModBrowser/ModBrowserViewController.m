@@ -849,6 +849,11 @@
         }
         [self layoutSourceControl];
         [self.tableView reloadData];
+    } else {
+        self.overrideUserInterfaceStyle = UIUserInterfaceStyleUnspecified;
+        self.tableView.backgroundColor = nil;
+        self.tableView.separatorColor = nil;
+        self.navigationController.navigationBar.tintColor = nil;
     }
 }
 
@@ -912,6 +917,7 @@
         self.sourceControl.selectedSegmentTintColor = [self isExperimentalUIEnabled] ? [UIColor colorWithRed:0.43 green:0.22 blue:0.70 alpha:1.0] : nil;
     } else {
         self.sourceControl.frame = CGRectMake(16, 8, MAX(0, width - 32), 36);
+        self.sourceControl.selectedSegmentTintColor = nil;
     }
 }
 
@@ -1244,6 +1250,13 @@
         cell.descriptionLabel.textColor = [UIColor colorWithWhite:0.76 alpha:1.0];
         cell.downloadsLabel.textColor = [UIColor colorWithWhite:0.58 alpha:1.0];
         cell.modIcon.backgroundColor = [UIColor colorWithRed:0.13 green:0.10 blue:0.20 alpha:1.0];
+    } else {
+        cell.backgroundColor = nil;
+        cell.contentView.backgroundColor = nil;
+        cell.nameLabel.textColor = UIColor.labelColor;
+        cell.descriptionLabel.textColor = UIColor.secondaryLabelColor;
+        cell.downloadsLabel.textColor = UIColor.tertiaryLabelColor;
+        cell.modIcon.backgroundColor = UIColor.secondarySystemGroupedBackgroundColor;
     }
     cell.nameLabel.text = project[@"title"] ?: @"Untitled mod";
     cell.descriptionLabel.text = project[@"description"] ?: @"";
