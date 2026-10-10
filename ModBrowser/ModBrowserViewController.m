@@ -1325,6 +1325,25 @@
     label.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     return label;
 }
+- (BOOL)iconCachingEnabled {
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    NSNumber *saved = [defaults objectForKey:@"STModBrowserIconCachingEnabled"];
+    return saved ? saved.boolValue : YES;
+}
+- (void)clearIconCache {
+    [self.iconCache removeAllObjects];
+    [self.iconSession.configuration.URLCache removeAllCachedResponses];
+    NSError *error = nil;
+    if (self.iconDiskCacheDirectory.length) {
+        [[NSFileManager defaultManager] removeItemAtPath:self.iconDiskCacheDirectory error:&error];
+        if (error && error.code != NSFileNoSuchFileError) {
+            [self showMessage:@"Some cached files could not be removed. Try again." title:@"Clear Image Cache"];
+            return;
+        }
+        [[NSFileManager defaultManager] createDirectoryAtPath:self.iconDiskCacheDirectory withIntermediateDirectories:YES attributes:nil error:nil];
+    }
+    [self showMessage:@"Cached mod images have been cleared. Images will download again when needed." title:@"Clear Image Cache"];
+}
 - (void)showFilters {
     NSUserDefaults *d=NSUserDefaults.standardUserDefaults;BOOL advanced=[d boolForKey:@"ModBrowserAdvancedSearchEnabled"],turbo=[d boolForKey:@"ModBrowserTurboDownloadsEnabled"];
     UIAlertController *m=[UIAlertController alertControllerWithTitle:@"Mod Browser Filters" message:@"Choose a filter category or toggle a feature." preferredStyle:UIAlertControllerStyleActionSheet];
@@ -1347,6 +1366,19 @@
     [m addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"Turbo Downloads: %@",turbo?@"On":@"Off"] style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
         BOOL on=![d boolForKey:@"ModBrowserTurboDownloadsEnabled"];[d setBool:on forKey:@"ModBrowserTurboDownloadsEnabled"];
         [self showMessage:on?@"Turbo Downloads enabled for future downloads. It cannot bypass host or network limits.":@"Turbo Downloads disabled." title:@"Download settings"];
+    }]];
+    BOOL iconCaching = [self iconCachingEnabled];
+    [m addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"Image Cache: %@", iconCaching ? @"On" : @"Off"] style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        BOOL enabled = ![self iconCachingEnabled];
+        [d setBool:enabled forKey:@"STModBrowserIconCachingEnabled"];
+        if (!enabled) {
+            [self clearIconCache];
+        } else {
+            [self showMessage:@"Image caching enabled. Mod icons will be saved for faster repeat visits." title:@"Image Cache"];
+        }
+    }]];
+    [m addAction:[UIAlertAction actionWithTitle:@"Clear Image Cache" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
+        [self clearIconCache];
     }]];
     [m addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];if(m.popoverPresentationController)m.popoverPresentationController.barButtonItem=self.navigationItem.rightBarButtonItem;[self presentViewController:m animated:YES completion:nil];
 }
@@ -1400,7 +1432,8 @@
     cell.downloadsLabel.text = downloads ? [NSString stringWithFormat:@"%@ downloads", [NSNumberFormatter localizedStringFromNumber:downloads numberStyle:NSNumberFormatterDecimalStyle]] : @"";
     cell.modIcon.image = [UIImage systemImageNamed:@"shippingbox"];
     NSString *iconURL = [project[@"icon_url"] isKindOfClass:NSString.class] ? project[@"icon_url"] : @"";
-    UIImage *cached = iconURL.length ? [self.iconCache objectForKey:iconURL] : nil;
+    BOOL iconCachingEnabled = [self iconCachingEnabled];
+    UIImage *cached = (iconCachingEnabled && iconURL.length) ? [self.iconCache objectForKey:iconURL] : nil;
     if (cached) {
         cell.modIcon.image = cached;
     } else if (iconURL.length) {
@@ -1408,7 +1441,7 @@
         cacheKey = [cacheKey stringByReplacingOccurrencesOfString:@"+" withString:@"-"];
         cacheKey = [cacheKey stringByReplacingOccurrencesOfString:@"=" withString:@""];
         NSString *diskPath = [self.iconDiskCacheDirectory stringByAppendingPathComponent:[cacheKey stringByAppendingString:@".jpg"]];
-        UIImage *diskImage = [UIImage imageWithContentsOfFile:diskPath];
+        UIImage *diskImage = iconCachingEnabled ? [UIImage imageWithContentsOfFile:diskPath] : nil;
         if (diskImage) {
             [self.iconCache setObject:diskImage forKey:iconURL];
             cell.modIcon.image = diskImage;
@@ -1417,7 +1450,7 @@
             NSURL *url = [NSURL URLWithString:iconURL];
             if (url && ([url.scheme.lowercaseString isEqualToString:@"https"] || [url.scheme.lowercaseString isEqualToString:@"http"])) {
                 __weak typeof(self) weakSelf = self;
-                NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReturnCacheDataElseLoad timeoutInterval:18];
+                NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url cachePolicy:(iconCachingEnabled ? NSURLRequestReturnCacheDataElseLoad : NSURLRequestReloadIgnoringLocalCacheData) timeoutInterval:18];
                 [request setValue:@"Amethyst-iOS-ModBrowser/1.4" forHTTPHeaderField:@"User-Agent"];
                 NSURLSessionDataTask *task = [self.iconSession dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
                     UIImage *thumbnail = nil;
@@ -1436,7 +1469,7 @@
                             CFRelease(source);
                         }
                     }
-                    if (thumbnail) {
+                    if (thumbnail && [weakSelf iconCachingEnabled]) {
                         NSData *jpeg = UIImageJPEGRepresentation(thumbnail, 0.82);
                         if (jpeg.length) [jpeg writeToFile:diskPath options:NSDataWritingAtomic error:nil];
                     }
@@ -1445,7 +1478,7 @@
                         if (!self) return;
                         [self.iconTasks removeObjectForKey:iconURL];
                         if (!thumbnail) return;
-                        [self.iconCache setObject:thumbnail forKey:iconURL];
+                        if ([self iconCachingEnabled]) [self.iconCache setObject:thumbnail forKey:iconURL];
                         for (ModProjectCell *visible in tableView.visibleCells) {
                             NSIndexPath *visiblePath = [tableView indexPathForCell:visible];
                             if (visiblePath && visiblePath.row < self.projects.count) {
