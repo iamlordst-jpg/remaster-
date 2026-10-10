@@ -644,8 +644,11 @@
     [self loadImageURL:self.galleryURLs[sender.tag] completion:^(UIImage *image) { imageView.image = image; }];
     viewer.modalPresentationStyle = UIModalPresentationFullScreen;
     [self presentViewController:viewer animated:YES completion:nil];
-    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:viewer action:@selector(dismissViewControllerAnimated:completion:)];
+    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(dismissGalleryViewer)];
     [viewer.view addGestureRecognizer:tap];
+}
+- (void)dismissGalleryViewer {
+    [self dismissViewControllerAnimated:YES completion:nil];
 }
 @end
 
