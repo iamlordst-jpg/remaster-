@@ -815,6 +815,10 @@
         else if ([lowerProfile containsString:@"forge"]) self.loader = @"forge";
         else if ([lowerProfile containsString:@"quilt"]) self.loader = @"quilt";
         else if ([lowerProfile containsString:@"fabric"]) self.loader = @"fabric";
+        if ([defaults boolForKey:@"STLauncherExperimentalMode"]) {
+            NSString *savedLoader = [defaults stringForKey:@"STLauncherDefaultLoader"];
+            if ([@[@"forge", @"fabric", @"quilt", @"neoforge"] containsObject:savedLoader]) self.loader = savedLoader;
+        }
     }
     return self;
 }
