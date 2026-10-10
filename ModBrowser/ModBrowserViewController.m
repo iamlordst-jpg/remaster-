@@ -1801,7 +1801,7 @@ static NSString * const STLauncherModeKey = @"STLauncherExperimentalMode";
 }
 @end
 
-@interface STLauncherSettingsViewController : UITableViewController
+@interface STLauncherSettingsViewController ()
 @property(nonatomic) UISegmentedControl *appearanceControl;
 @property(nonatomic) UISegmentedControl *loaderControl;
 @property(nonatomic) UISegmentedControl *sortControl;
