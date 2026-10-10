@@ -40,8 +40,45 @@
         return [([b[@"created"] description] ?: @"") compare:([a[@"created"] description] ?: @"")];
     }];
 }
+- (id)propertyListSafeValue:(id)value {
+    if (!value || value == [NSNull null]) return @"";
+    if ([value isKindOfClass:NSString.class] || [value isKindOfClass:NSNumber.class] || [value isKindOfClass:NSDate.class] || [value isKindOfClass:NSData.class]) return value;
+    if ([value isKindOfClass:NSArray.class]) {
+        NSMutableArray *safeArray = [NSMutableArray arrayWithCapacity:[value count]];
+        for (id item in value) [safeArray addObject:[self propertyListSafeValue:item] ?: @""];
+        return safeArray;
+    }
+    if ([value isKindOfClass:NSDictionary.class]) {
+        NSMutableDictionary *safeDictionary = [NSMutableDictionary dictionary];
+        [(NSDictionary *)value enumerateKeysAndObjectsUsingBlock:^(id key, id obj, BOOL *stop) {
+            if (![key isKindOfClass:NSString.class]) return;
+            safeDictionary[key] = [self propertyListSafeValue:obj] ?: @"";
+        }];
+        return safeDictionary;
+    }
+    return [value description] ?: @"";
+}
+- (NSDictionary *)compactProjectRecord:(NSDictionary *)project {
+    if (![project isKindOfClass:NSDictionary.class]) return @{};
+    NSArray *keys = @[@"project_id", @"id", @"title", @"slug", @"icon_url", @"project_type", @"description", @"author", @"loaders", @"game_versions", @"client_side", @"server_side"];
+    NSMutableDictionary *compact = [NSMutableDictionary dictionary];
+    for (NSString *key in keys) {
+        id value = project[key];
+        if (value && value != [NSNull null]) compact[key] = [self propertyListSafeValue:value] ?: @"";
+    }
+    return compact;
+}
 - (void)saveRecords:(NSArray<NSDictionary *> *)records {
-    [[NSUserDefaults standardUserDefaults] setObject:records forKey:@"STModDownloadRecords"];
+    NSMutableArray *safeRecords = [NSMutableArray arrayWithCapacity:records.count];
+    for (id item in records) {
+        if (![item isKindOfClass:NSDictionary.class]) continue;
+        NSMutableDictionary *record = [item mutableCopy];
+        id project = record[@"project"];
+        if ([project isKindOfClass:NSDictionary.class]) record[@"project"] = [self compactProjectRecord:project];
+        NSDictionary *safeRecord = [self propertyListSafeValue:record];
+        if ([safeRecord isKindOfClass:NSDictionary.class]) [safeRecords addObject:safeRecord];
+    }
+    [[NSUserDefaults standardUserDefaults] setObject:safeRecords forKey:@"STModDownloadRecords"];
 }
 - (void)updateRecord:(NSDictionary *)record {
     NSMutableArray *records = [self mutableRecords];
