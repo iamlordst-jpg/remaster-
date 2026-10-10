@@ -1458,7 +1458,16 @@
     [request setValue:@"Amethyst-iOS-ModBrowser/1.1" forHTTPHeaderField:@"User-Agent"];
     NSURLSessionDownloadTask *task = [session downloadTaskWithRequest:request completionHandler:^(NSURL *location, NSURLResponse *response, NSError *error) {
         NSError *moveError = nil;
-        if (!error && location) {
+        if (!error && [response isKindOfClass:NSHTTPURLResponse.class]) {
+            NSInteger statusCode = ((NSHTTPURLResponse *)response).statusCode;
+            if (statusCode < 200 || statusCode >= 300) {
+                moveError = [NSError errorWithDomain:@"STLauncherDownload" code:statusCode userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"The download server returned HTTP %ld.", (long)statusCode]}];
+            }
+        }
+        if (!error && !location && !moveError) {
+            moveError = [NSError errorWithDomain:@"STLauncherDownload" code:5 userInfo:@{NSLocalizedDescriptionKey:@"The download did not return a file."}];
+        }
+        if (!error && location && !moveError) {
             NSString *temporaryDestination = [destination stringByAppendingString:@".download"];
             [NSFileManager.defaultManager removeItemAtPath:temporaryDestination error:nil];
             [NSFileManager.defaultManager moveItemAtURL:location toURL:[NSURL fileURLWithPath:temporaryDestination] error:&moveError];
@@ -2069,6 +2078,10 @@ static NSString * const STLauncherModeKey = @"STLauncherExperimentalMode";
         [[NSUserDefaults standardUserDefaults] setBool:sender.on forKey:@"STLauncherExperimentalPrefetchThumbnails"];
     }
     if ([feature[@"key"] isEqualToString:@"STLauncherExperimentalUI"]) {
+        NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+        NSString *appearance = [defaults stringForKey:@"STLauncherAppearance"] ?: @"system";
+        if (sender.on) [defaults setObject:@"purple" forKey:@"STLauncherAppearance"];
+        else if ([appearance isEqualToString:@"purple"]) [defaults setObject:@"system" forKey:@"STLauncherAppearance"];
         self.navigationController.topViewController.overrideUserInterfaceStyle = UIUserInterfaceStyleUnspecified;
     }
 }
