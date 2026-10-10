@@ -1630,6 +1630,7 @@ static NSString * const STLauncherModeKey = @"STLauncherExperimentalMode";
 @interface STLauncherHomeViewController ()
 @property(nonatomic) UIStackView *buttonStack;
 @property(nonatomic) UIButton *playButton;
+@property(nonatomic) UILabel *versionLabel;
 @end
 
 @implementation STLauncherHomeViewController
@@ -1656,6 +1657,7 @@ static NSString * const STLauncherModeKey = @"STLauncherExperimentalMode";
     UILabel *subtitle = [[UILabel alloc] init];
     NSString *selectedVersion = PLProfiles.current.selectedProfile[@"lastVersionId"] ?: @"No version selected";
     subtitle.text = [NSString stringWithFormat:@"Selected version: %@\nYour Minecraft Java launcher, with a cleaner interface.", selectedVersion];
+    self.versionLabel = subtitle;
     subtitle.font = [UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];
     subtitle.textColor = [UIColor colorWithWhite:0.78 alpha:1.0];
     subtitle.numberOfLines = 0;
@@ -1707,21 +1709,44 @@ static NSString * const STLauncherModeKey = @"STLauncherExperimentalMode";
     self.buttonStack.spacing = 12;
     self.buttonStack.translatesAutoresizingMaskIntoConstraints = NO;
     intro.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.view addSubview:intro];
-    [self.view addSubview:self.playButton];
-    [self.view addSubview:self.buttonStack];
+    UIScrollView *scrollView = [[UIScrollView alloc] init];
+    scrollView.translatesAutoresizingMaskIntoConstraints = NO;
+    scrollView.alwaysBounceVertical = YES;
+    scrollView.showsVerticalScrollIndicator = YES;
+    UIView *contentView = [[UIView alloc] init];
+    contentView.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:scrollView];
+    [scrollView addSubview:contentView];
+    [contentView addSubview:intro];
+    [contentView addSubview:self.playButton];
+    [contentView addSubview:self.buttonStack];
     [NSLayoutConstraint activateConstraints:@[
-        [intro.leadingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor constant:22],
-        [intro.trailingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor constant:-22],
-        [intro.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:34],
+        [scrollView.leadingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor],
+        [scrollView.trailingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor],
+        [scrollView.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
+        [scrollView.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor],
+        [contentView.leadingAnchor constraintEqualToAnchor:scrollView.contentLayoutGuide.leadingAnchor],
+        [contentView.trailingAnchor constraintEqualToAnchor:scrollView.contentLayoutGuide.trailingAnchor],
+        [contentView.topAnchor constraintEqualToAnchor:scrollView.contentLayoutGuide.topAnchor],
+        [contentView.bottomAnchor constraintEqualToAnchor:scrollView.contentLayoutGuide.bottomAnchor],
+        [contentView.widthAnchor constraintEqualToAnchor:scrollView.frameLayoutGuide.widthAnchor],
+        [intro.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:22],
+        [intro.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-22],
+        [intro.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:30],
         [self.playButton.leadingAnchor constraintEqualToAnchor:intro.leadingAnchor],
         [self.playButton.trailingAnchor constraintEqualToAnchor:intro.trailingAnchor],
         [self.playButton.topAnchor constraintEqualToAnchor:intro.bottomAnchor constant:24],
         [self.playButton.heightAnchor constraintGreaterThanOrEqualToConstant:60],
         [self.buttonStack.leadingAnchor constraintEqualToAnchor:intro.leadingAnchor],
         [self.buttonStack.trailingAnchor constraintEqualToAnchor:intro.trailingAnchor],
-        [self.buttonStack.topAnchor constraintEqualToAnchor:self.playButton.bottomAnchor constant:22]
+        [self.buttonStack.topAnchor constraintEqualToAnchor:self.playButton.bottomAnchor constant:22],
+        [self.buttonStack.bottomAnchor constraintEqualToAnchor:contentView.bottomAnchor constant:-24]
     ]];
+}
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    NSString *selectedVersion = PLProfiles.current.selectedProfile[@"lastVersionId"] ?: @"No version selected";
+    self.versionLabel.text = [NSString stringWithFormat:@"Selected version: %@\nYour Minecraft Java launcher, with a cleaner interface.", selectedVersion];
 }
 - (void)openDestination:(UIButton *)sender {
     NSArray *names = @[@"ModBrowserViewController", @"STLauncherDownloadsViewController", @"ModBrowserViewController", @"LauncherProfilesViewController", @"STLauncherSettingsViewController", @"LauncherPreferencesViewController"];
