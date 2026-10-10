@@ -847,9 +847,9 @@
             self.tableView.separatorColor = nil;
             self.navigationController.navigationBar.tintColor = nil;
         }
+        [self layoutSourceControl];
+        [self.tableView reloadData];
     }
-    [self layoutSourceControl];
-    [self.tableView reloadData];
 }
 
 - (void)viewDidLoad {
@@ -1366,7 +1366,8 @@
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:project[@"title"] ?: @"Mod details" message:message preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"Back" style:UIAlertActionStyleCancel handler:nil]];
     NSString *projectType = [project[@"project_type"] isKindOfClass:NSString.class] ? project[@"project_type"] : self.projectType;
-    [alert addAction:[UIAlertAction actionWithTitle:([projectType isEqualToString:@"mod"] ? @"Download .jar" : @"Download archive") style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+    NSString *downloadActionTitle = [projectType isEqualToString:@"mod"] ? ([self isSTLauncherMode] ? @"Download .jar" : @"Install .jar") : @"Download archive";
+    [alert addAction:[UIAlertAction actionWithTitle:downloadActionTitle style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         [self downloadVersion:version project:project];
     }]];
     [self presentViewController:alert animated:YES completion:nil];
@@ -1406,7 +1407,7 @@
         file = nil;
         for (NSDictionary *candidate in files) if ([[candidate[@"filename"] lowercaseString] hasSuffix:targetExtension]) { file = candidate; break; }
     }
-    if (!file) { [self showMessage:[NSString stringWithFormat:@"No downloadable %@ file was found for this version.", targetExtension] title:@"Download unavailable"]; return; }
+    if (!file) { [self showMessage:[NSString stringWithFormat:@"No downloadable %@ file was found for this version.", targetExtension] title:[self isSTLauncherMode] ? @"Download unavailable" : @"Cannot install mod"]; return; }
     NSURL *url = [NSURL URLWithString:file[@"url"] ?: @""];
     if (!url || !url.scheme.length) { [self showMessage:@"This version has no accessible download URL." title:@"Download failed"]; return; }
     NSString *directory = [self downloadDirectoryForProjectType:projectType];
@@ -1420,7 +1421,7 @@
     NSString *filename = file[@"filename"] ?: url.lastPathComponent;
     NSString *destination = [directory stringByAppendingPathComponent:filename];
     if ([NSFileManager.defaultManager fileExistsAtPath:destination]) {
-        [self showMessage:[NSString stringWithFormat:@"%@ is already downloaded.", filename] title:@"Already downloaded"];
+        [self showMessage:[NSString stringWithFormat:@"%@ is already %@.", filename, [self isSTLauncherMode] ? @"downloaded" : @"installed"] title:[self isSTLauncherMode] ? @"Already downloaded" : @"Already installed"];
         return;
     }
     NSString *downloadTitle = [self isSTLauncherMode] ? @"Downloading…" : @"Downloading mod…";
@@ -1507,11 +1508,11 @@
                 if (error || moveError) {
                     NSString *message = (error ?: moveError).localizedDescription ?: @"Download failed.";
                     if (diagnosticsEnabled) message = [message stringByAppendingFormat:@"\n\n%@", diagnostic];
-                    [self showMessage:message title:@"Download failed"];
+                    [self showMessage:message title:[self isSTLauncherMode] ? @"Download failed" : @"Install failed"];
                 } else {
-                    NSString *message = [NSString stringWithFormat:@"%@ was downloaded to:\n%@", filename, directory];
+                    NSString *message = [NSString stringWithFormat:@"%@ was %@ to:\n%@", filename, [self isSTLauncherMode] ? @"downloaded" : @"installed", directory];
                     if (diagnosticsEnabled) message = [message stringByAppendingFormat:@"\n\n%@", diagnostic];
-                    [self showMessage:message title:@"Download complete"];
+                    [self showMessage:message title:[self isSTLauncherMode] ? @"Download complete" : @"Mod installed"];
                 }
             }];
         });
