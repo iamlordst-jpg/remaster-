@@ -15,6 +15,10 @@
 - (NSString *)imageName;
 @end
 
+@interface STLauncherSettingsViewController : UITableViewController
+- (NSString *)imageName;
+@end
+
 @interface STLauncherExperimentalFeaturesViewController : UITableViewController
 - (NSString *)imageName;
 @end
