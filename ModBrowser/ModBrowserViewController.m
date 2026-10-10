@@ -537,8 +537,13 @@
 }
 - (NSString *)readableMarkdown:(NSString *)markdown {
     NSString *text = [markdown stringByReplacingOccurrencesOfString:@"\r\n" withString:@"\n"];
-    // Render common Markdown constructs as clean readable text without exposing
-    // raw syntax in the native detail page. Gallery images are displayed above.
+    // Modrinth descriptions may contain raw YouTube iframe embeds. Native labels
+    // cannot render them, so remove the entire embed instead of showing HTML.
+    NSRegularExpression *iframe = [NSRegularExpression regularExpressionWithPattern:@"(?is)<iframe\\b[^>]*>.*?</iframe\\s*>|<iframe\\b[^>]*/?>" options:0 error:nil];
+    text = [iframe stringByReplacingMatchesInString:text options:0 range:NSMakeRange(0, text.length) withTemplate:@""];
+    // Remove other raw HTML tags while keeping their readable text.
+    NSRegularExpression *html = [NSRegularExpression regularExpressionWithPattern:@"(?is)<(?!https?://)[a-z][^>]*>" options:0 error:nil];
+    text = [html stringByReplacingMatchesInString:text options:0 range:NSMakeRange(0, text.length) withTemplate:@""];
     NSArray<NSString *> *patterns = @[
         @"!\\[([^\\]]*)\\]\\((https?://[^\\s\\)]+)\\)",
         @"\\[([^\\]]+)\\]\\((https?://[^\\s\\)]+)\\)",
@@ -548,7 +553,9 @@
         @"(?<!_)_([^_\\n]+)_(?!_)",
         @"`([^`]+)`"
     ];
-    NSArray<NSString *> *replacements = @[@"$1 (image shown above)", @"$1 — $2", @"$1", @"$1", @"$1", @"$1", @"$1"];
+    // Image thumbnails are shown in the Screenshots gallery, so don't emit
+    // the misleading "(image shown above)" placeholder into the text.
+    NSArray<NSString *> *replacements = @[@"$1", @"$1 — $2", @"$1", @"$1", @"$1", @"$1", @"$1"];
     for (NSUInteger i = 0; i < patterns.count; i++) {
         NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:patterns[i] options:NSRegularExpressionDotMatchesLineSeparators error:nil];
         text = [regex stringByReplacingMatchesInString:text options:0 range:NSMakeRange(0, text.length) withTemplate:replacements[i]];
@@ -559,6 +566,9 @@
     text = [list stringByReplacingMatchesInString:text options:0 range:NSMakeRange(0, text.length) withTemplate:@"• "];
     NSRegularExpression *quote = [NSRegularExpression regularExpressionWithPattern:@"(?m)^\\s*>\\s?" options:0 error:nil];
     text = [quote stringByReplacingMatchesInString:text options:0 range:NSMakeRange(0, text.length) withTemplate:@"“"];
+    // Collapse the blank lines left behind by removed embeds.
+    NSRegularExpression *blankLines = [NSRegularExpression regularExpressionWithPattern:@"\\n[ \\t]*\\n(?:[ \\t]*\\n)+" options:0 error:nil];
+    text = [blankLines stringByReplacingMatchesInString:text options:0 range:NSMakeRange(0, text.length) withTemplate:@"\n\n"];
     return [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
 }
 - (void)openProjectLink:(UIButton *)sender {
