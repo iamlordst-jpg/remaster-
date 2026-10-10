@@ -677,6 +677,7 @@
 @property(nonatomic) NSString *loader;
 @property(nonatomic) NSString *query;
 @property(nonatomic) NSString *minecraftVersion;
+@property(nonatomic) NSString *sortOrder;
 @property(nonatomic) BOOL loading;
 @property(nonatomic) NSInteger offset;
 @property(nonatomic) NSInteger totalHits;
@@ -699,6 +700,7 @@
         self.title = @"Mod Browser";
         self.loader = @"fabric";
         self.query = @"";
+        self.sortOrder = @"relevance";
         self.projects = [NSMutableArray array];
         self.iconCache = [[NSCache alloc] init];
         self.iconCache.countLimit = 250;
@@ -813,7 +815,7 @@
             [NSURLQueryItem queryItemWithName:@"searchFilter" value:self.query ?: @""],
             [NSURLQueryItem queryItemWithName:@"pageSize" value:@"20"],
             [NSURLQueryItem queryItemWithName:@"index" value:[NSString stringWithFormat:@"%ld", (long)self.offset]],
-            [NSURLQueryItem queryItemWithName:@"sortField" value:@"2"],
+            [NSURLQueryItem queryItemWithName:@"sortField" value:([self.sortOrder isEqualToString:@"downloads"] ? @"6" : ([self.sortOrder isEqualToString:@"updated"] ? @"3" : @"2"))],
             [NSURLQueryItem queryItemWithName:@"sortOrder" value:@"desc"], nil];
         NSDictionary *loaderIDs = @{@"forge":@"1", @"fabric":@"4", @"quilt":@"5", @"neoforge":@"6"};
         [items addObject:[NSURLQueryItem queryItemWithName:@"modLoaderType" value:loaderIDs[self.loader] ?: @"1"]];
@@ -832,7 +834,7 @@
             [NSURLQueryItem queryItemWithName:@"query" value:self.query ?: @""],
             [NSURLQueryItem queryItemWithName:@"limit" value:@"20"],
             [NSURLQueryItem queryItemWithName:@"offset" value:[NSString stringWithFormat:@"%ld", (long)self.offset]],
-            [NSURLQueryItem queryItemWithName:@"index" value:@"relevance"],
+            [NSURLQueryItem queryItemWithName:@"index" value:self.sortOrder ?: @"relevance"],
             [NSURLQueryItem queryItemWithName:@"facets" value:facets]
         ];
         request = [NSMutableURLRequest requestWithURL:[self URLForPath:@"/search" queryItems:items]];
@@ -875,7 +877,7 @@
             } else {
                 [self.projects addObjectsFromArray:hits ?: @[]];
                 if ([[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalPrefetchThumbnails"]) {
-                    NSUInteger prefetchCount = MIN(self.projects.count, self.offset + (hits ?: @[]).count + 8);
+                    NSUInteger prefetchCount = MIN(self.projects.count, self.offset + 8);
                     for (NSUInteger i = self.offset; i < prefetchCount; i++) [self prefetchThumbnailForProject:self.projects[i]];
                 }
                 self.totalHits = total; self.offset = self.projects.count;
@@ -906,6 +908,14 @@
                 self.loader = loader;
                 [self searchForProjectsReset:YES];
             }]];
+    }
+    for (NSString *sort in @[@"relevance", @"downloads", @"updated"]) {
+        NSString *label = [sort isEqualToString:@"relevance"] ? @"Sort: Relevance" : ([sort isEqualToString:@"downloads"] ? @"Sort: Most downloads" : @"Sort: Recently updated");
+        if ([self.sortOrder isEqualToString:sort]) label = [label stringByAppendingString:@" ✓"];
+        [alert addAction:[UIAlertAction actionWithTitle:label style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+            self.sortOrder = sort;
+            [self searchForProjectsReset:YES];
+        }]];
     }
     [alert addAction:[UIAlertAction actionWithTitle:@"Match selected profile version" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         NSString *version = PLProfiles.current.selectedProfile[@"lastVersionId"] ?: @"";
@@ -1160,6 +1170,8 @@
     NSURLSessionConfiguration *configuration = NSURLSessionConfiguration.defaultSessionConfiguration;
     configuration.requestCachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
     configuration.timeoutIntervalForResource = 180;
+    configuration.HTTPMaximumConnectionsPerHost = 8;
+    configuration.URLCache = nil;
     NSURLSession *session = [NSURLSession sessionWithConfiguration:configuration];
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
     request.timeoutInterval = 45;
