@@ -818,6 +818,8 @@
         if ([defaults boolForKey:@"STLauncherExperimentalMode"]) {
             NSString *savedLoader = [defaults stringForKey:@"STLauncherDefaultLoader"];
             if ([@[@"forge", @"fabric", @"quilt", @"neoforge"] containsObject:savedLoader]) self.loader = savedLoader;
+            NSString *savedSort = [defaults stringForKey:@"STLauncherDefaultSort"];
+            if ([@[@"relevance", @"downloads", @"updated"] containsObject:savedSort]) self.sortOrder = savedSort;
         }
     }
     return self;
@@ -826,16 +828,21 @@
 - (NSString *)imageName { return @"shippingbox"; }
 - (BOOL)isSTLauncherMode { return [[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalMode"]; }
 - (BOOL)isExperimentalUIEnabled { return [self isSTLauncherMode] && [[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalUI"]; }
+- (BOOL)isDarkBrowserAppearance {
+    NSString *appearance = [[NSUserDefaults standardUserDefaults] stringForKey:@"STLauncherAppearance"] ?: @"system";
+    return [self isSTLauncherMode] && ([self isExperimentalUIEnabled] || [appearance isEqualToString:@"dark"] || [appearance isEqualToString:@"purple"]);
+}
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
     if ([self isSTLauncherMode]) {
-        self.overrideUserInterfaceStyle = [self isExperimentalUIEnabled] ? UIUserInterfaceStyleDark : UIUserInterfaceStyleUnspecified;
+        NSString *appearance = [[NSUserDefaults standardUserDefaults] stringForKey:@"STLauncherAppearance"] ?: @"system";
+        self.overrideUserInterfaceStyle = [self isDarkBrowserAppearance] ? UIUserInterfaceStyleDark : ([appearance isEqualToString:@"light"] ? UIUserInterfaceStyleLight : UIUserInterfaceStyleUnspecified);
         if ([self isExperimentalUIEnabled]) {
             self.tableView.backgroundColor = [UIColor colorWithRed:0.045 green:0.035 blue:0.075 alpha:1.0];
             self.tableView.separatorColor = [UIColor colorWithWhite:1.0 alpha:0.09];
             self.navigationController.navigationBar.tintColor = [UIColor colorWithRed:0.75 green:0.55 blue:1.0 alpha:1.0];
         } else {
-            self.tableView.backgroundColor = UIColor.systemGroupedBackgroundColor;
+            self.tableView.backgroundColor = self.overrideUserInterfaceStyle == UIUserInterfaceStyleDark ? UIColor.systemBackgroundColor : UIColor.systemGroupedBackgroundColor;
             self.tableView.separatorColor = nil;
             self.navigationController.navigationBar.tintColor = nil;
         }
@@ -1753,20 +1760,25 @@ static NSString * const STLauncherModeKey = @"STLauncherExperimentalMode";
     self.tableView.estimatedRowHeight = 120;
     self.tableView.tableFooterView = [[UIView alloc] initWithFrame:CGRectZero];
     self.appearanceControl = [[UISegmentedControl alloc] initWithItems:@[@"System", @"Light", @"Dark", @"Purple"]];
+    self.appearanceControl.translatesAutoresizingMaskIntoConstraints = NO;
     self.appearanceControl.tag = 0;
     [self.appearanceControl addTarget:self action:@selector(settingChanged:) forControlEvents:UIControlEventValueChanged];
     self.loaderControl = [[UISegmentedControl alloc] initWithItems:@[@"Forge", @"Fabric", @"Quilt", @"Neo"]];
+    self.loaderControl.translatesAutoresizingMaskIntoConstraints = NO;
     self.loaderControl.tag = 1;
     [self.loaderControl addTarget:self action:@selector(settingChanged:) forControlEvents:UIControlEventValueChanged];
     self.sortControl = [[UISegmentedControl alloc] initWithItems:@[@"Relevant", @"Downloads", @"Updated"]];
+    self.sortControl.translatesAutoresizingMaskIntoConstraints = NO;
     self.sortControl.tag = 2;
     [self.sortControl addTarget:self action:@selector(settingChanged:) forControlEvents:UIControlEventValueChanged];
     self.connectionStepper = [[UIStepper alloc] init];
+    self.connectionStepper.translatesAutoresizingMaskIntoConstraints = NO;
     self.connectionStepper.minimumValue = 2;
     self.connectionStepper.maximumValue = 12;
     self.connectionStepper.stepValue = 1;
     [self.connectionStepper addTarget:self action:@selector(connectionChanged:) forControlEvents:UIControlEventValueChanged];
     self.connectionCountLabel = [[UILabel alloc] init];
+    self.connectionCountLabel.translatesAutoresizingMaskIntoConstraints = NO;
     self.connectionCountLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
     self.connectionCountLabel.textAlignment = NSTextAlignmentRight;
     [self reloadSettings];
