@@ -1331,6 +1331,9 @@
     return saved ? saved.boolValue : YES;
 }
 - (void)clearIconCache {
+    // Stop outstanding icon requests so they cannot repopulate the cache immediately after it is cleared.
+    for (NSURLSessionDataTask *task in self.iconTasks.allValues) [task cancel];
+    [self.iconTasks removeAllObjects];
     [self.iconCache removeAllObjects];
     [self.iconSession.configuration.URLCache removeAllCachedResponses];
     NSError *error = nil;
@@ -1342,6 +1345,7 @@
         }
         [[NSFileManager defaultManager] createDirectoryAtPath:self.iconDiskCacheDirectory withIntermediateDirectories:YES attributes:nil error:nil];
     }
+    [self.tableView reloadData];
     [self showMessage:@"Cached mod images have been cleared. Images will download again when needed." title:@"Clear Image Cache"];
 }
 - (void)showFilters {
