@@ -537,13 +537,19 @@
 }
 - (NSString *)readableMarkdown:(NSString *)markdown {
     NSString *text = [markdown stringByReplacingOccurrencesOfString:@"\r\n" withString:@"\n"];
-    // Modrinth descriptions may contain raw YouTube iframe embeds. Native labels
-    // cannot render them, so remove the entire embed instead of showing HTML.
-    NSRegularExpression *iframe = [NSRegularExpression regularExpressionWithPattern:@"(?is)<iframe\\b[^>]*>.*?</iframe\\s*>|<iframe\\b[^>]*/?>" options:0 error:nil];
-    text = [iframe stringByReplacingMatchesInString:text options:0 range:NSMakeRange(0, text.length) withTemplate:@""];
-    // Remove other raw HTML tags while keeping their readable text.
-    NSRegularExpression *html = [NSRegularExpression regularExpressionWithPattern:@"(?is)<(?!https?://)[a-z][^>]*>" options:0 error:nil];
-    text = [html stringByReplacingMatchesInString:text options:0 range:NSMakeRange(0, text.length) withTemplate:@""];
+    // Strip raw or escaped iframe embeds; native labels cannot render HTML.
+    NSArray<NSString *> *embedPatterns = @[
+        @"(?is)<iframe\\b[^>]*>.*?</iframe\\s*>",
+        @"(?is)<iframe\\b[^>]*>(?:(?!</?iframe\\b).)*$",
+        @"(?is)&lt;iframe\\b.*?(?:&lt;/iframe\\s*&gt;|$)"
+    ];
+    for (NSString *pattern in embedPatterns) {
+        NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:pattern options:0 error:nil];
+        text = [regex stringByReplacingMatchesInString:text options:0 range:NSMakeRange(0, text.length) withTemplate:@"\n"];
+    }
+    // Remove common HTML tags but retain the text between them.
+    NSRegularExpression *html = [NSRegularExpression regularExpressionWithPattern:@"(?is)</?(?:div|span|p|br|hr|h[1-6]|ul|ol|li|a|img|video|source|figure|figcaption|details|summary|table|thead|tbody|tr|td|th|pre|code|blockquote)\\b[^>]*>" options:0 error:nil];
+    text = [html stringByReplacingMatchesInString:text options:0 range:NSMakeRange(0, text.length) withTemplate:@" "];
     NSArray<NSString *> *patterns = @[
         @"!\\[([^\\]]*)\\]\\((https?://[^\\s\\)]+)\\)",
         @"\\[([^\\]]+)\\]\\((https?://[^\\s\\)]+)\\)",
@@ -553,20 +559,20 @@
         @"(?<!_)_([^_\\n]+)_(?!_)",
         @"`([^`]+)`"
     ];
-    // Image thumbnails are shown in the Screenshots gallery, so don't emit
-    // the misleading "(image shown above)" placeholder into the text.
     NSArray<NSString *> *replacements = @[@"$1", @"$1 — $2", @"$1", @"$1", @"$1", @"$1", @"$1"];
     for (NSUInteger i = 0; i < patterns.count; i++) {
         NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:patterns[i] options:NSRegularExpressionDotMatchesLineSeparators error:nil];
         text = [regex stringByReplacingMatchesInString:text options:0 range:NSMakeRange(0, text.length) withTemplate:replacements[i]];
     }
-    NSRegularExpression *heading = [NSRegularExpression regularExpressionWithPattern:@"(?m)^\\s{0,3}#{1,6}\\s*" options:0 error:nil];
-    text = [heading stringByReplacingMatchesInString:text options:0 range:NSMakeRange(0, text.length) withTemplate:@""];
+    // Put Markdown headings on separate lines and make lists easy to scan.
+    NSRegularExpression *heading = [NSRegularExpression regularExpressionWithPattern:@"(?m)^\\s{0,3}#{1,6}\\s*(.+?)\\s*#*\\s*$" options:0 error:nil];
+    text = [heading stringByReplacingMatchesInString:text options:0 range:NSMakeRange(0, text.length) withTemplate:@"\n\n$1\n"];
     NSRegularExpression *list = [NSRegularExpression regularExpressionWithPattern:@"(?m)^\\s*(?:[-*+] |\\d+\\. )" options:0 error:nil];
     text = [list stringByReplacingMatchesInString:text options:0 range:NSMakeRange(0, text.length) withTemplate:@"• "];
     NSRegularExpression *quote = [NSRegularExpression regularExpressionWithPattern:@"(?m)^\\s*>\\s?" options:0 error:nil];
     text = [quote stringByReplacingMatchesInString:text options:0 range:NSMakeRange(0, text.length) withTemplate:@"“"];
-    // Collapse the blank lines left behind by removed embeds.
+    NSRegularExpression *spaces = [NSRegularExpression regularExpressionWithPattern:@"[ \\t]{2,}" options:0 error:nil];
+    text = [spaces stringByReplacingMatchesInString:text options:0 range:NSMakeRange(0, text.length) withTemplate:@" "];
     NSRegularExpression *blankLines = [NSRegularExpression regularExpressionWithPattern:@"\\n[ \\t]*\\n(?:[ \\t]*\\n)+" options:0 error:nil];
     text = [blankLines stringByReplacingMatchesInString:text options:0 range:NSMakeRange(0, text.length) withTemplate:@"\n\n"];
     return [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
