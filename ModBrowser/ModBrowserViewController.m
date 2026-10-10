@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #import "ModBrowserViewController.h"
 #import "PLProfiles.h"
+#import <ImageIO/ImageIO.h>
 
 
 @interface STDownloadCoordinator : NSObject <NSURLSessionDownloadDelegate>
@@ -1028,6 +1029,8 @@
 @property(nonatomic) NSURLSessionDataTask *searchTask;
 @property(nonatomic) UIActivityIndicatorView *activity;
 @property(nonatomic) NSCache<NSString *, UIImage *> *iconCache;
+@property(nonatomic) NSURLSession *iconSession;
+@property(nonatomic) NSString *iconDiskCacheDirectory;
 @property(nonatomic) NSMutableDictionary<NSString *, NSURLSessionDataTask *> *iconTasks;
 @property(nonatomic) UISegmentedControl *sourceControl;
 @property(nonatomic) BOOL curseForgeSource;
@@ -1064,8 +1067,18 @@
         if ([@[@"relevance", @"downloads", @"updated"] containsObject:savedSort]) self.sortOrder = savedSort;
         self.projects = [NSMutableArray array];
         self.iconCache = [[NSCache alloc] init];
-        self.iconCache.countLimit = 250;
+        self.iconCache.countLimit = 400;
         self.iconTasks = [NSMutableDictionary dictionary];
+        NSURLSessionConfiguration *iconConfiguration = [NSURLSessionConfiguration ephemeralSessionConfiguration];
+        iconConfiguration.requestCachePolicy = NSURLRequestReturnCacheDataElseLoad;
+        iconConfiguration.URLCache = [[NSURLCache alloc] initWithMemoryCapacity:12 * 1024 * 1024 diskCapacity:48 * 1024 * 1024 diskPath:@"st-mod-browser-icons"];
+        iconConfiguration.HTTPMaximumConnectionsPerHost = 12;
+        iconConfiguration.timeoutIntervalForRequest = 18;
+        iconConfiguration.timeoutIntervalForResource = 35;
+        self.iconSession = [NSURLSession sessionWithConfiguration:iconConfiguration];
+        NSString *cacheRoot = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES).firstObject ?: NSTemporaryDirectory();
+        self.iconDiskCacheDirectory = [cacheRoot stringByAppendingPathComponent:@"STModBrowserIcons"];
+        [NSFileManager.defaultManager createDirectoryAtPath:self.iconDiskCacheDirectory withIntermediateDirectories:YES attributes:nil error:nil];
         NSString *profileVersion = PLProfiles.current.selectedProfile[@"lastVersionId"] ?: @"";
         NSRegularExpression *pattern = [NSRegularExpression regularExpressionWithPattern:@"\\d+\\.\\d+(?:\\.\\d+)?" options:0 error:nil];
         NSTextCheckingResult *match = [pattern firstMatchInString:profileVersion options:0 range:NSMakeRange(0, profileVersion.length)];
@@ -1386,51 +1399,66 @@
     NSNumber *downloads = project[@"downloads"];
     cell.downloadsLabel.text = downloads ? [NSString stringWithFormat:@"%@ downloads", [NSNumberFormatter localizedStringFromNumber:downloads numberStyle:NSNumberFormatterDecimalStyle]] : @"";
     cell.modIcon.image = [UIImage systemImageNamed:@"shippingbox"];
-
     NSString *iconURL = [project[@"icon_url"] isKindOfClass:NSString.class] ? project[@"icon_url"] : @"";
     UIImage *cached = iconURL.length ? [self.iconCache objectForKey:iconURL] : nil;
     if (cached) {
         cell.modIcon.image = cached;
     } else if (iconURL.length) {
-        NSURL *url = [NSURL URLWithString:iconURL];
-        if (url && !self.iconTasks[iconURL]) {
-            // Coalesce requests so fast scrolling does not download the same icon repeatedly.
-            __weak typeof(self) weakSelf = self;
-            NSURLSessionDataTask *task = [NSURLSession.sharedSession dataTaskWithURL:url completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-                UIImage *image = data && !error ? [UIImage imageWithData:data] : nil;
-                UIImage *thumbnail = nil;
-                if (image) {
-                    CGSize target = CGSizeMake(96, 96);
-                    UIGraphicsImageRendererFormat *format = [[UIGraphicsImageRendererFormat alloc] init];
-                    format.scale = 1.0;
-                    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:target format:format];
-                    thumbnail = [renderer imageWithActions:^(UIGraphicsImageRendererContext *context) {
-                        CGFloat scale = MIN(target.width / MAX(image.size.width, 1), target.height / MAX(image.size.height, 1));
-                        CGSize fitted = CGSizeMake(image.size.width * scale, image.size.height * scale);
-                        CGRect rect = CGRectMake((target.width - fitted.width) / 2.0, (target.height - fitted.height) / 2.0, fitted.width, fitted.height);
-                        [image drawInRect:rect];
-                    }];
-                }
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    __strong typeof(weakSelf) self = weakSelf;
-                    if (!self) return;
-                    [self.iconTasks removeObjectForKey:iconURL];
-                    if (!thumbnail) return;
-                    [self.iconCache setObject:thumbnail forKey:iconURL];
-                    for (ModProjectCell *visible in tableView.visibleCells) {
-                        NSIndexPath *visiblePath = [tableView indexPathForCell:visible];
-                        if (visiblePath && visiblePath.row < self.projects.count) {
-                            NSDictionary *visibleProject = self.projects[visiblePath.row];
-                            if ([visible.projectID isEqualToString:visibleProject[@"project_id"]] &&
-                                [visibleProject[@"icon_url"] isEqualToString:iconURL]) {
-                                visible.modIcon.image = thumbnail;
+        NSString *cacheKey = [[iconURL dataUsingEncoding:NSUTF8StringEncoding] base64EncodedStringWithOptions:0];
+        NSString *diskPath = [self.iconDiskCacheDirectory stringByAppendingPathComponent:[cacheKey stringByAppendingString:@".jpg"]];
+        UIImage *diskImage = [UIImage imageWithContentsOfFile:diskPath];
+        if (diskImage) {
+            [self.iconCache setObject:diskImage forKey:iconURL];
+            cell.modIcon.image = diskImage;
+        }
+        if (!self.iconTasks[iconURL]) {
+            NSURL *url = [NSURL URLWithString:iconURL];
+            if (url && ([url.scheme.lowercaseString isEqualToString:@"https"] || [url.scheme.lowercaseString isEqualToString:@"http"])) {
+                __weak typeof(self) weakSelf = self;
+                NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReturnCacheDataElseLoad timeoutInterval:18];
+                [request setValue:@"Amethyst-iOS-ModBrowser/1.4" forHTTPHeaderField:@"User-Agent"];
+                NSURLSessionDataTask *task = [self.iconSession dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+                    UIImage *thumbnail = nil;
+                    if (data.length && !error) {
+                        CGImageSourceRef source = CGImageSourceCreateWithData((__bridge CFDataRef)data, NULL);
+                        if (source) {
+                            NSDictionary *options = @{(NSString *)kCGImageSourceCreateThumbnailFromImageAlways:@YES,
+                                                      (NSString *)kCGImageSourceThumbnailMaxPixelSize:@192,
+                                                      (NSString *)kCGImageSourceCreateThumbnailWithTransform:@YES,
+                                                      (NSString *)kCGImageSourceShouldCacheImmediately:@YES};
+                            CGImageRef cgThumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, (__bridge CFDictionaryRef)options);
+                            if (cgThumbnail) {
+                                thumbnail = [UIImage imageWithCGImage:cgThumbnail scale:UIScreen.mainScreen.scale orientation:UIImageOrientationUp];
+                                CGImageRelease(cgThumbnail);
                             }
+                            CFRelease(source);
                         }
                     }
-                });
-            }];
-            self.iconTasks[iconURL] = task;
-            [task resume];
+                    if (thumbnail) {
+                        NSData *jpeg = UIImageJPEGRepresentation(thumbnail, 0.82);
+                        if (jpeg.length) [jpeg writeToFile:diskPath options:NSDataWritingAtomic error:nil];
+                    }
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        __strong typeof(weakSelf) self = weakSelf;
+                        if (!self) return;
+                        [self.iconTasks removeObjectForKey:iconURL];
+                        if (!thumbnail) return;
+                        [self.iconCache setObject:thumbnail forKey:iconURL];
+                        for (ModProjectCell *visible in tableView.visibleCells) {
+                            NSIndexPath *visiblePath = [tableView indexPathForCell:visible];
+                            if (visiblePath && visiblePath.row < self.projects.count) {
+                                NSDictionary *visibleProject = self.projects[visiblePath.row];
+                                if ([visible.projectID isEqualToString:visibleProject[@"project_id"]] &&
+                                    [visibleProject[@"icon_url"] isEqualToString:iconURL]) {
+                                    visible.modIcon.image = thumbnail;
+                                }
+                            }
+                        }
+                    });
+                }];
+                self.iconTasks[iconURL] = task;
+                [task resume];
+            }
         }
     }
     cell.descriptionLabel.numberOfLines = 2;
