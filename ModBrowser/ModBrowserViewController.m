@@ -1058,8 +1058,8 @@
                 if (!self.projects.count) self.tableView.backgroundView = [self messageView:self.curseForgeSource ? @"Couldn’t load CurseForge. Check the API key and connection, then pull to retry." : @"Couldn’t load Modrinth. Check your connection and pull to retry."];
             } else {
                 [self.projects addObjectsFromArray:hits ?: @[]];
-                if ([[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalPrefetchThumbnails"] ||
-                    ([[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalInstantThumbnails"] && [self isSTLauncherMode])) {
+                if ([self isSTLauncherMode] && ([[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalPrefetchThumbnails"] ||
+                    [[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalInstantThumbnails"])) {
                     NSUInteger prefetchCount = MIN(self.projects.count, self.offset + 8);
                     for (NSUInteger i = self.offset; i < prefetchCount; i++) [self prefetchThumbnailForProject:self.projects[i]];
                 }
@@ -1085,12 +1085,14 @@
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Mod Browser Filters"
         message:[NSString stringWithFormat:@"Loader: %@\nMinecraft version: %@", self.loader.capitalizedString, self.minecraftVersion ?: @"Any"]
         preferredStyle:UIAlertControllerStyleActionSheet];
-    for (NSString *loader in @[@"forge", @"fabric", @"quilt", @"neoforge"]) {
-        [alert addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"%@%@", loader.capitalizedString, [loader isEqualToString:self.loader] ? @" ✓" : @""]
-            style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-                self.loader = loader;
-                [self searchForProjectsReset:YES];
-            }]];
+    if (![self isSTLauncherMode] || [self.projectType isEqualToString:@"mod"]) {
+        for (NSString *loader in @[@"forge", @"fabric", @"quilt", @"neoforge"]) {
+            [alert addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"%@%@", loader.capitalizedString, [loader isEqualToString:self.loader] ? @" ✓" : @""]
+                style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+                    self.loader = loader;
+                    [self searchForProjectsReset:YES];
+                }]];
+        }
     }
     if ([self isSTLauncherMode] && [[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalAdvancedSearch"]) {
         for (NSString *type in @[@"mod", @"resourcepack", @"shader", @"datapack"]) {
@@ -1130,13 +1132,16 @@
             }]];
         }
     }
-    for (NSString *sort in @[@"relevance", @"downloads", @"updated"]) {
-        NSString *label = [sort isEqualToString:@"relevance"] ? @"Sort: Relevance" : ([sort isEqualToString:@"downloads"] ? @"Sort: Most downloads" : @"Sort: Recently updated");
-        if ([self.sortOrder isEqualToString:sort]) label = [label stringByAppendingString:@" ✓"];
-        [alert addAction:[UIAlertAction actionWithTitle:label style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-            self.sortOrder = sort;
-            [self searchForProjectsReset:YES];
-        }]];
+    if ([self isSTLauncherMode]) {
+        for (NSString *sort in @[@"relevance", @"downloads", @"updated"]) {
+            NSString *label = [sort isEqualToString:@"relevance"] ? @"Sort: Relevance" : ([sort isEqualToString:@"downloads"] ? @"Sort: Most downloads" : @"Sort: Recently updated");
+            if ([self.sortOrder isEqualToString:sort]) label = [label stringByAppendingString:@" ✓"];
+            [alert addAction:[UIAlertAction actionWithTitle:label style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+                self.sortOrder = sort;
+                [[NSUserDefaults standardUserDefaults] setObject:sort forKey:@"STLauncherDefaultSort"];
+                [self searchForProjectsReset:YES];
+            }]];
+        }
     }
     [alert addAction:[UIAlertAction actionWithTitle:@"Match selected profile version" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         NSString *version = PLProfiles.current.selectedProfile[@"lastVersionId"] ?: @"";
@@ -1418,7 +1423,11 @@
         [self showMessage:[NSString stringWithFormat:@"%@ is already downloaded.", filename] title:@"Already downloaded"];
         return;
     }
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Downloading…" message:[NSString stringWithFormat:@"%@\n\nPreparing download…\nSaving to ST Mod Browser/%@.", filename, folderName] preferredStyle:UIAlertControllerStyleAlert];
+    NSString *downloadTitle = [self isSTLauncherMode] ? @"Downloading…" : @"Downloading mod…";
+    NSString *downloadMessage = [self isSTLauncherMode]
+        ? [NSString stringWithFormat:@"%@\n\nPreparing download…\nSaving to ST Mod Browser/%@.", filename, folderName]
+        : [NSString stringWithFormat:@"%@\n\nSaving to ST Mod Browser/mods.", filename];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:downloadTitle message:downloadMessage preferredStyle:UIAlertControllerStyleAlert];
     self.activeDownloadAlert = alert;
     self.activeDownloadFilename = filename;
     [self presentViewController:alert animated:YES completion:nil];
@@ -1432,7 +1441,7 @@
     configuration.timeoutIntervalForResource = turboDownloads ? 240 : 180;
     NSInteger configuredConnections = [[NSUserDefaults standardUserDefaults] integerForKey:@"STLauncherDownloadConcurrency"];
     if (configuredConnections < 2) configuredConnections = 6;
-    configuration.HTTPMaximumConnectionsPerHost = turboDownloads ? 12 : MIN(12, MAX(2, configuredConnections));
+    configuration.HTTPMaximumConnectionsPerHost = [self isSTLauncherMode] ? (turboDownloads ? 12 : MIN(12, MAX(2, configuredConnections))) : 8;
     configuration.URLCache = nil;
     NSURLSession *session = [NSURLSession sessionWithConfiguration:configuration];
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
@@ -1508,7 +1517,7 @@
         });
     }];
     self.activeDownloadTask = task;
-    self.downloadProgressTimer = [NSTimer scheduledTimerWithTimeInterval:0.4 target:self selector:@selector(updateDownloadProgress) userInfo:nil repeats:YES];
+    if ([self isSTLauncherMode]) self.downloadProgressTimer = [NSTimer scheduledTimerWithTimeInterval:0.4 target:self selector:@selector(updateDownloadProgress) userInfo:nil repeats:YES];
     if (turboDownloads) task.priority = NSURLSessionTaskPriorityHigh;
     [task resume];
 }
@@ -1528,7 +1537,7 @@
     NSString *eta = expected > received && speedKB > 0
         ? [NSString stringWithFormat:@"\nETA: %@", [NSString stringWithFormat:@"%.0f sec", ((double)(expected - received) / 1024.0) / speedKB]]
         : @"";
-    alert.message = [NSString stringWithFormat:@"%@\n\n%@\nSpeed: %.1f KB/s%@\nSaving to ST Mod Browser/%@.", self.activeDownloadFilename ?: @"File", progress, speedKB, eta, self.activeDownloadFolderName ?: @"mods"];
+    if ([self isSTLauncherMode]) alert.message = [NSString stringWithFormat:@"%@\n\n%@\nSpeed: %.1f KB/s%@\nSaving to ST Mod Browser/%@.", self.activeDownloadFilename ?: @"File", progress, speedKB, eta, self.activeDownloadFolderName ?: @"mods"];
 }
 - (void)showMessage:(NSString *)message title:(NSString *)title {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:title message:message preferredStyle:UIAlertControllerStyleAlert];
