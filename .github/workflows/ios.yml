@@ -95,7 +95,7 @@ jobs:
           gpatch ./Amethyst-iOS/Natives/JavaLauncher.m JavaLauncher.patch
           gpatch ./Amethyst-iOS/Natives/CMakeLists.txt CMakeLists.patch
 
-      - name: Integrate in-app Modrinth browser
+      - name: Integrate Mod Browser and experimental STLauncher
         run: |
           cp ModBrowser/ModBrowserViewController.h Amethyst-iOS/Natives/ModBrowserViewController.h
           cp ModBrowser/ModBrowserViewController.m Amethyst-iOS/Natives/ModBrowserViewController.m
@@ -126,7 +126,8 @@ jobs:
                   profiles_marker,
                   profiles_marker
                   + '        [LauncherMenuCustomItem vcClass:STLauncherModeViewController.class],\n'
-                  + '        [LauncherMenuCustomItem vcClass:ModBrowserViewController.class],\n',
+                  + '        [LauncherMenuCustomItem vcClass:ModBrowserViewController.class],\n'
+                  + '        [LauncherMenuCustomItem vcClass:STLauncherHomeViewController.class],\n',
                   1,
               )
           # The launcher normally forces its account-avatar button onto every
@@ -154,6 +155,14 @@ jobs:
               '            }\n',
               1,
           )
+          initial_selection = '    NSIndexPath *indexPath = [NSIndexPath indexPathForRow:1 inSection:0];\n'
+          if initial_selection in source:
+              source = source.replace(
+                  initial_selection,
+                  '    NSUInteger initialIndex = [[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalMode"] ? 5 : 1;\n'
+                  '    NSIndexPath *indexPath = [NSIndexPath indexPathForRow:initialIndex inSection:0];\n',
+                  1,
+              )
           menu.write_text(source)
           PY
 
