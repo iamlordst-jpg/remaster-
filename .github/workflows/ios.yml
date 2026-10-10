@@ -108,6 +108,9 @@ jobs:
               finish_code = "        NSMutableDictionary *stRecord = [[[NSUserDefaults standardUserDefaults] dictionaryForKey:@\"STMainMenuDownloadStatus\"] mutableCopy] ?: [NSMutableDictionary dictionary];\n        stRecord[@\"status\"] = @\"Completed\";\n        stRecord[@\"received\"] = @(MAX(0, self.task.textProgress.completedUnitCount));\n        stRecord[@\"expected\"] = @(MAX(0, self.task.textProgress.totalUnitCount));\n        [[NSUserDefaults standardUserDefaults] setObject:stRecord forKey:@\"STMainMenuDownloadStatus\"];\n        [[NSNotificationCenter defaultCenter] postNotificationName:@\"STModDownloadsChanged\" object:nil];\n        self.task = nil;\n        [self setInteractionEnabled:YES forDownloading:YES];"
               if finish_marker not in source: raise SystemExit("Could not locate main-menu download completion")
               source = source.replace(finish_marker, finish_code, 1)
+              failure_marker = "                weakSelf.task = nil;\n                weakSelf.progressVC = nil;"
+              failure_code = "                NSMutableDictionary *stRecord = [[[NSUserDefaults standardUserDefaults] dictionaryForKey:@\\"STMainMenuDownloadStatus\\"] mutableCopy] ?: [NSMutableDictionary dictionary];\n                stRecord[@\\"status\\"] = @\\"Failed\\";\n                [[NSUserDefaults standardUserDefaults] setObject:stRecord forKey:@\\"STMainMenuDownloadStatus\\"];\n                [[NSNotificationCenter defaultCenter] postNotificationName:@\\"STModDownloadsChanged\\" object:nil];\n                weakSelf.task = nil;\n                weakSelf.progressVC = nil;"
+              if failure_marker in source: source = source.replace(failure_marker, failure_code)
               nav.write_text(source)
 
           # Reconnect background URLSession events after iOS relaunches the app.
