@@ -514,7 +514,7 @@
                 @[@"Issue tracker", @"issues_url"], @[@"Discord", @"discord_url"]
             ]) {
                 NSString *url = [detail[pair[1]] isKindOfClass:NSString.class] ? detail[pair[1]] : @"";
-                if (url.length && [NSURL URLWithString:url]) [links addObject:@{@ "title":pair[0], @"url":url}];
+                if (url.length && [NSURL URLWithString:url]) [links addObject:@{@"title":pair[0], @"url":url}];
             }
             if (links.count) {
                 [self.contentStack addArrangedSubview:[self sectionTitle:@"Links"]];
