@@ -1,6 +1,7 @@
 name: iOS CI
 
 on:
+  push:
   workflow_dispatch:
 
 concurrency:
