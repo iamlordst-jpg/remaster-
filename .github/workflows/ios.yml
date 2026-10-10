@@ -62,6 +62,9 @@ jobs:
           from pathlib import Path
           cmake = Path("Amethyst-iOS/Natives/CMakeLists.txt")
           source = cmake.read_text()
+          imageio_link = 'set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -framework ImageIO")'
+          if imageio_link not in source:
+              source = source.replace("set(CMAKE_C_FLAGS_DEBUG", imageio_link + "\\nset(CMAKE_C_FLAGS_DEBUG", 1)
           marker = "  LauncherMenuViewController.m\n"
           entry = "  ModBrowserViewController.m\n"
           if entry not in source:
