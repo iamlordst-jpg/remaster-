@@ -1350,29 +1350,61 @@
     [self showMessage:@"Cached mod images have been cleared. Images will download again when needed." title:@"Clear Image Cache"];
 }
 - (void)showFilters {
-    NSUserDefaults *d=NSUserDefaults.standardUserDefaults;BOOL advanced=[d boolForKey:@"ModBrowserAdvancedSearchEnabled"],turbo=[d boolForKey:@"ModBrowserTurboDownloadsEnabled"];
-    UIAlertController *m=[UIAlertController alertControllerWithTitle:@"Mod Browser Filters" message:@"Choose a filter category or toggle a feature." preferredStyle:UIAlertControllerStyleActionSheet];
+    UIAlertController *m=[UIAlertController alertControllerWithTitle:@"Mod Browser Filters" message:@"Choose what projects to show." preferredStyle:UIAlertControllerStyleActionSheet];
+    BOOL advanced = [NSUserDefaults.standardUserDefaults boolForKey:@"ModBrowserAdvancedSearchEnabled"];
     if(advanced){[m addAction:[UIAlertAction actionWithTitle:@"Project type…" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self showProjectTypeFilters];}]];
         if(!self.curseForgeSource&&[self.projectType isEqualToString:@"mod"])[m addAction:[UIAlertAction actionWithTitle:@"Environment…" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self showEnvironmentFilters];}]];}
     if([self.projectType isEqualToString:@"mod"])[m addAction:[UIAlertAction actionWithTitle:@"Mod loader…" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self showLoaderFilters];}]];
     [m addAction:[UIAlertAction actionWithTitle:@"Sort results…" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self showSortFilters];}]];
     [m addAction:[UIAlertAction actionWithTitle:@"Minecraft version…" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self showVersionFilters];}]];
-    [m addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"Advanced Mod Search: %@",advanced?@"On":@"Off"] style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-        BOOL on=![d boolForKey:@"ModBrowserAdvancedSearchEnabled"];[d setBool:on forKey:@"ModBrowserAdvancedSearchEnabled"];
-        if(!on){self.projectType=@"mod";self.environmentFilter=@"any";[d setObject:@"mod" forKey:@"ModBrowserProjectType"];[d setObject:@"any" forKey:@"ModBrowserEnvironmentFilter"];}
-        self.searchController.searchBar.placeholder=[NSString stringWithFormat:@"Search %@ on %@",[self projectTypeLabel],self.curseForgeSource?@"CurseForge":@"Modrinth"];[self searchForProjectsReset:YES];
+    [m addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    if(m.popoverPresentationController && self.navigationItem.rightBarButtonItems.count) m.popoverPresentationController.barButtonItem=self.navigationItem.rightBarButtonItems.firstObject;
+    [self presentViewController:m animated:YES completion:nil];
+}
+- (void)showModBrowserSettings {
+    NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+    BOOL advanced = [d boolForKey:@"ModBrowserAdvancedSearchEnabled"];
+    BOOL background = [d boolForKey:@"STBackgroundDownloadsEnabled"];
+    BOOL turbo = [d boolForKey:@"ModBrowserTurboDownloadsEnabled"];
+    BOOL caching = [self iconCachingEnabled];
+    UIAlertController *m = [UIAlertController alertControllerWithTitle:@"Mod Browser Settings" message:@"Optional features and cache controls." preferredStyle:UIAlertControllerStyleActionSheet];
+    [m addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"Advanced Mod Search: %@", advanced ? @"On" : @"Off"] style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        BOOL enabled = ![d boolForKey:@"ModBrowserAdvancedSearchEnabled"];
+        [d setBool:enabled forKey:@"ModBrowserAdvancedSearchEnabled"];
+        if (!enabled) {
+            self.projectType = @"mod";
+            self.environmentFilter = @"any";
+            [d setObject:@"mod" forKey:@"ModBrowserProjectType"];
+            [d setObject:@"any" forKey:@"ModBrowserEnvironmentFilter"];
+        }
+        self.searchController.searchBar.placeholder = [NSString stringWithFormat:@"Search %@ on %@", [self projectTypeLabel], self.curseForgeSource ? @"CurseForge" : @"Modrinth"];
+        [self searchForProjectsReset:YES];
     }]];
-    BOOL backgroundDownloads = [d boolForKey:@"STBackgroundDownloadsEnabled"];
-    [m addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"Background Downloads: %@", backgroundDownloads ? @"On" : @"Off"] style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+    [m addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"Background Downloads: %@", background ? @"On" : @"Off"] style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
         BOOL enabled = ![d boolForKey:@"STBackgroundDownloadsEnabled"];
         [d setBool:enabled forKey:@"STBackgroundDownloadsEnabled"];
-        [self showMessage:enabled ? @"Background downloads enabled. Transfers appear in Download Manager and can continue when you leave the browser.":@"Background downloads disabled. New downloads will use the in-screen downloader." title:@"Background Downloads"];
+        [self showMessage:enabled ? @"Background downloads enabled. Transfers appear in Download Manager and can continue when you leave the browser." : @"Background downloads disabled. New downloads will use the in-screen downloader." title:@"Background Downloads"];
     }]];
-    [m addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"Turbo Downloads: %@",turbo?@"On":@"Off"] style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-        BOOL on=![d boolForKey:@"ModBrowserTurboDownloadsEnabled"];[d setBool:on forKey:@"ModBrowserTurboDownloadsEnabled"];
-        [self showMessage:on?@"Turbo Downloads enabled for future downloads. It cannot bypass host or network limits.":@"Turbo Downloads disabled." title:@"Download settings"];
+    [m addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"Turbo Downloads: %@", turbo ? @"On" : @"Off"] style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        BOOL enabled = ![d boolForKey:@"ModBrowserTurboDownloadsEnabled"];
+        [d setBool:enabled forKey:@"ModBrowserTurboDownloadsEnabled"];
+        [self showMessage:enabled ? @"Turbo Downloads enabled for future downloads. It cannot bypass host or network limits." : @"Turbo Downloads disabled." title:@"Download Settings"];
     }]];
-    [m addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];if(m.popoverPresentationController)m.popoverPresentationController.barButtonItem=self.navigationItem.rightBarButtonItem;[self presentViewController:m animated:YES completion:nil];
+    [m addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"Image Cache: %@", caching ? @"On" : @"Off"] style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        BOOL enabled = ![self iconCachingEnabled];
+        [d setBool:enabled forKey:@"STModBrowserIconCachingEnabled"];
+        if (!enabled) {
+            [self clearIconCache];
+        } else {
+            [self showMessage:@"Image caching enabled. Mod icons will be saved for faster repeat visits." title:@"Image Cache"];
+        }
+    }]];
+    [m addAction:[UIAlertAction actionWithTitle:@"Clear Image Cache" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
+        [self clearIconCache];
+    }]];
+    [m addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    if (m.popoverPresentationController && self.navigationItem.rightBarButtonItems.count > 1) m.popoverPresentationController.barButtonItem = self.navigationItem.rightBarButtonItems[1];
+    [self presentViewController:m animated:YES completion:nil];
 }
 - (NSString *)projectTypeLabel {if([self.projectType isEqualToString:@"resourcepack"])return @"resource packs";if([self.projectType isEqualToString:@"shader"])return @"shaders";if([self.projectType isEqualToString:@"datapack"])return @"data packs";return @"mods";}
 - (void)presentFilterMenu:(UIAlertController *)m {if(m.popoverPresentationController)m.popoverPresentationController.barButtonItem=self.navigationItem.rightBarButtonItem;[self presentViewController:m animated:YES completion:nil];}
