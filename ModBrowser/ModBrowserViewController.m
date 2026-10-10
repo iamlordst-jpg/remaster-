@@ -726,11 +726,6 @@
     [self.refreshControl addTarget:self action:@selector(refreshProjects) forControlEvents:UIControlEventValueChanged];
     self.tableView.rowHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedRowHeight = 94;
-    if ([[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalMode"]) {
-        self.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
-        self.view.tintColor = [UIColor colorWithRed:0.68 green:0.42 blue:1.0 alpha:1.0];
-        self.tableView.backgroundColor = [UIColor colorWithRed:0.055 green:0.045 blue:0.085 alpha:1.0];
-    }
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchController.searchResultsUpdater = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
@@ -1357,7 +1352,15 @@ static NSString * const STLauncherModeKey = @"STLauncherExperimentalMode";
     Class cls = NSClassFromString(names[sender.tag]);
     if (!cls) return;
     UIViewController *destination = [[cls alloc] init];
+    if ([[NSUserDefaults standardUserDefaults] boolForKey:STLauncherModeKey] &&
+        [names[sender.tag] isEqualToString:@"ModBrowserViewController"]) {
+        destination.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+    }
     [self.navigationController pushViewController:destination animated:YES];
+    if ([[NSUserDefaults standardUserDefaults] boolForKey:STLauncherModeKey] &&
+        [names[sender.tag] isEqualToString:@"ModBrowserViewController"]) {
+        destination.view.tintColor = [UIColor colorWithRed:0.68 green:0.42 blue:1.0 alpha:1.0];
+    }
 }
 - (void)switchToAmethyst {
     [[NSUserDefaults standardUserDefaults] setBool:NO forKey:STLauncherModeKey];
