@@ -506,9 +506,27 @@
             NSString *body = [detail[@"body"] isKindOfClass:NSString.class] ? detail[@"body"] : @"";
             if (body.length) {
                 [self.contentStack addArrangedSubview:[self sectionTitle:@"Description"]];
-                // Keep Markdown source readable without adding a third-party renderer.
-                body = [body stringByReplacingOccurrencesOfString:@"\r\n" withString:@"\n"];
-                [self.contentStack addArrangedSubview:[self bodyLabel:body]];
+                [self.contentStack addArrangedSubview:[self bodyLabel:[self readableMarkdown:body]]];
+            }
+            NSMutableArray<NSDictionary *> *links = [NSMutableArray array];
+            for (NSArray *pair in @[
+                @[@"Source code", @"source_url"], @[@"Wiki", @"wiki_url"],
+                @[@"Issue tracker", @"issues_url"], @[@"Discord", @"discord_url"]
+            ]) {
+                NSString *url = [detail[pair[1]] isKindOfClass:NSString.class] ? detail[pair[1]] : @"";
+                if (url.length && [NSURL URLWithString:url]) [links addObject:@{@ "title":pair[0], @"url":url}];
+            }
+            if (links.count) {
+                [self.contentStack addArrangedSubview:[self sectionTitle:@"Links"]];
+                for (NSDictionary *link in links) {
+                    UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+                    button.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeading;
+                    [button setTitle:[NSString stringWithFormat:@"↗  %@", link[@"title"]] forState:UIControlStateNormal];
+                    button.titleLabel.numberOfLines = 1;
+                    button.accessibilityHint = link[@"url"];
+                    [button addTarget:self action:@selector(openProjectLink:) forControlEvents:UIControlEventTouchUpInside];
+                    [self.contentStack addArrangedSubview:button];
+                }
             }
             NSString *updated = detail[@"updated"] ?: detail[@"dateModified"] ?: @"";
             if ([updated isKindOfClass:NSString.class] && updated.length >= 10) {
@@ -516,6 +534,36 @@
             }
         });
     }] resume];
+}
+- (NSString *)readableMarkdown:(NSString *)markdown {
+    NSString *text = [markdown stringByReplacingOccurrencesOfString:@"\r\n" withString:@"\n"];
+    // Render common Markdown constructs as clean readable text without exposing
+    // raw syntax in the native detail page. Gallery images are displayed above.
+    NSArray<NSString *> *patterns = @[
+        @"!\\[([^\\]]*)\\]\\((https?://[^\\s\\)]+)\\)",
+        @"\\[([^\\]]+)\\]\\((https?://[^\\s\\)]+)\\)",
+        @"\\*\\*(.+?)\\*\\*",
+        @"__(.+?)__",
+        @"(?<!\\*)\\*([^*\\n]+)\\*(?!\\*)",
+        @"(?<!_)_([^_\\n]+)_(?!_)",
+        @"`([^`]+)`"
+    ];
+    NSArray<NSString *> *replacements = @[@"$1 (image shown above)", @"$1 — $2", @"$1", @"$1", @"$1", @"$1", @"$1"];
+    for (NSUInteger i = 0; i < patterns.count; i++) {
+        NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:patterns[i] options:NSRegularExpressionDotMatchesLineSeparators error:nil];
+        text = [regex stringByReplacingMatchesInString:text options:0 range:NSMakeRange(0, text.length) withTemplate:replacements[i]];
+    }
+    NSRegularExpression *heading = [NSRegularExpression regularExpressionWithPattern:@"(?m)^\\s{0,3}#{1,6}\\s*" options:0 error:nil];
+    text = [heading stringByReplacingMatchesInString:text options:0 range:NSMakeRange(0, text.length) withTemplate:@""];
+    NSRegularExpression *list = [NSRegularExpression regularExpressionWithPattern:@"(?m)^\\s*(?:[-*+] |\\d+\\. )" options:0 error:nil];
+    text = [list stringByReplacingMatchesInString:text options:0 range:NSMakeRange(0, text.length) withTemplate:@"• "];
+    NSRegularExpression *quote = [NSRegularExpression regularExpressionWithPattern:@"(?m)^\\s*>\\s?" options:0 error:nil];
+    text = [quote stringByReplacingMatchesInString:text options:0 range:NSMakeRange(0, text.length) withTemplate:@"“"];
+    return [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+}
+- (void)openProjectLink:(UIButton *)sender {
+    NSURL *url = [NSURL URLWithString:sender.accessibilityHint ?: @""];
+    if (url && url.scheme.length) [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
 }
 - (void)addGalleryFromProject:(NSDictionary *)detail curseForge:(BOOL)curseForge {
     NSArray *gallery = [detail[@"gallery"] isKindOfClass:NSArray.class] ? detail[@"gallery"] : @[];
@@ -527,6 +575,16 @@
     if (curseForge && !urls.count) {
         NSArray *screenshots = [detail[@"screenshots"] isKindOfClass:NSArray.class] ? detail[@"screenshots"] : @[];
         for (NSDictionary *item in screenshots) if ([item[@"url"] isKindOfClass:NSString.class]) [urls addObject:item[@"url"]];
+    }
+    // Some projects put showcase images directly in their Markdown description
+    // instead of uploading them to the gallery. Include those images too.
+    NSString *body = [detail[@"body"] isKindOfClass:NSString.class] ? detail[@"body"] : @"";
+    NSRegularExpression *imagePattern = [NSRegularExpression regularExpressionWithPattern:@"!\\[[^\\]]*\\]\\((https?://[^\\s\\)]+)\\)" options:0 error:nil];
+    for (NSTextCheckingResult *match in [imagePattern matchesInString:body options:0 range:NSMakeRange(0, body.length)]) {
+        if (match.numberOfRanges > 1) {
+            NSString *url = [body substringWithRange:[match rangeAtIndex:1]];
+            if (![urls containsObject:url]) [urls addObject:url];
+        }
     }
     self.galleryURLs = urls;
     if (!urls.count) return;
