@@ -88,36 +88,6 @@ jobs:
           elif guarded not in source: raise SystemExit("Could not locate account button assignment")
           menu.write_text(source)
 
-          # Track main-menu downloads so the Mod Browser Download Manager can show live status.
-          nav = Path("Amethyst-iOS/Natives/LauncherNavigationController.m")
-          source = nav.read_text()
-          marker = "// STLauncher main-menu download tracking"
-          if marker not in source:
-              start = "    self.task = [MinecraftResourceDownloadTask new];\n    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{"
-              first = "    self.task = [MinecraftResourceDownloadTask new];\n    [[NSUserDefaults standardUserDefaults] setObject:@{@\"id\": @\"main-menu-download\", @\"title\": @\"Minecraft version download\", @\"filename\": @\"Minecraft resources\", @\"status\": @\"Downloading\", @\"received\": @0, @\"expected\": @0, @\"created\": [NSDate date].description} forKey:@\"STMainMenuDownloadStatus\"];\n    [[NSNotificationCenter defaultCenter] postNotificationName:@\"STModDownloadsChanged\" object:nil];\n    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{"
-              if start not in source: raise SystemExit("Could not locate main-menu version download start")
-              source = source.replace(start, first, 1)
-              modpack_marker = "    NSDictionary *userInfo = notification.userInfo;\n"
-              modpack_tracking = """    NSDictionary *userInfo = notification.userInfo;
-                  [[NSUserDefaults standardUserDefaults] setObject:@{@"id": @"main-menu-download", @"title": @"Modpack download", @"filename": @"Modpack resources", @"status": @"Downloading", @"received": @0, @"expected": @0, @"created": [NSDate date].description} forKey:@"STMainMenuDownloadStatus"];
-                  [[NSNotificationCenter defaultCenter] postNotificationName:@"STModDownloadsChanged" object:nil];
-              """
-              if modpack_marker not in source: raise SystemExit("Could not locate main-menu modpack download start")
-              source = source.replace(modpack_marker, modpack_tracking, 1)
-              source = source.replace(start, second, 1)
-              progress_marker = "    progress.completedUnitCount = completedUnitCount;\n"
-              progress_code = "    progress.completedUnitCount = completedUnitCount;\n    // STLauncher main-menu download tracking\n    NSMutableDictionary *stRecord = [[[NSUserDefaults standardUserDefaults] dictionaryForKey:@\"STMainMenuDownloadStatus\"] mutableCopy] ?: [NSMutableDictionary dictionary];\n    stRecord[@\"id\"] = @\"main-menu-download\";\n    stRecord[@\"status\"] = @\"Downloading\";\n    stRecord[@\"received\"] = @(MAX(0, completedUnitCount));\n    stRecord[@\"expected\"] = @(MAX(0, progress.totalUnitCount));\n    if (!stRecord[@\"created\"]) stRecord[@\"created\"] = [NSDate date].description;\n    [[NSUserDefaults standardUserDefaults] setObject:stRecord forKey:@\"STMainMenuDownloadStatus\"];\n    [[NSNotificationCenter defaultCenter] postNotificationName:@\"STModDownloadsChanged\" object:nil];\n"
-              if progress_marker not in source: raise SystemExit("Could not locate main-menu progress update")
-              source = source.replace(progress_marker, progress_code, 1)
-              finish_marker = "        self.task = nil;\n        [self setInteractionEnabled:YES forDownloading:YES];"
-              finish_code = "        NSMutableDictionary *stRecord = [[[NSUserDefaults standardUserDefaults] dictionaryForKey:@\"STMainMenuDownloadStatus\"] mutableCopy] ?: [NSMutableDictionary dictionary];\n        stRecord[@\"status\"] = @\"Completed\";\n        stRecord[@\"received\"] = @(MAX(0, self.task.textProgress.completedUnitCount));\n        stRecord[@\"expected\"] = @(MAX(0, self.task.textProgress.totalUnitCount));\n        [[NSUserDefaults standardUserDefaults] setObject:stRecord forKey:@\"STMainMenuDownloadStatus\"];\n        [[NSNotificationCenter defaultCenter] postNotificationName:@\"STModDownloadsChanged\" object:nil];\n        self.task = nil;\n        [self setInteractionEnabled:YES forDownloading:YES];"
-              if finish_marker not in source: raise SystemExit("Could not locate main-menu download completion")
-              source = source.replace(finish_marker, finish_code, 1)
-              failure_marker = "                weakSelf.task = nil;\n                weakSelf.progressVC = nil;"
-              failure_code = "                NSMutableDictionary *stRecord = [[[NSUserDefaults standardUserDefaults] dictionaryForKey:@\"STMainMenuDownloadStatus\"] mutableCopy] ?: [NSMutableDictionary dictionary];\n                stRecord[@\"status\"] = @\"Failed\";\n                [[NSUserDefaults standardUserDefaults] setObject:stRecord forKey:@\"STMainMenuDownloadStatus\"];\n                [[NSNotificationCenter defaultCenter] postNotificationName:@\"STModDownloadsChanged\" object:nil];\n                weakSelf.task = nil;\n                weakSelf.progressVC = nil;"
-              if failure_marker in source: source = source.replace(failure_marker, failure_code)
-              nav.write_text(source)
-
           # Give the main-menu download progress screen an explicit Close button.
           progress_vc = Path("Amethyst-iOS/Natives/DownloadProgressViewController.m")
           source = progress_vc.read_text()
