@@ -104,12 +104,12 @@ jobs:
                   return;
               }
               stBackgroundSessionCompletionHandler = [completionHandler copy];
+              [[NSNotificationCenter defaultCenter] removeObserver:self name:@"STBackgroundURLSessionDidFinishEvents" object:nil];
+              [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(st_backgroundSessionDidFinishEvents:) name:@"STBackgroundURLSessionDidFinishEvents" object:nil];
               Class coordinatorClass = NSClassFromString(@"STDownloadCoordinator");
               if (coordinatorClass && [coordinatorClass respondsToSelector:NSSelectorFromString(@"shared")]) {
                   [coordinatorClass performSelector:NSSelectorFromString(@"shared")];
               }
-              [[NSNotificationCenter defaultCenter] removeObserver:self name:@"STBackgroundURLSessionDidFinishEvents" object:nil];
-              [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(st_backgroundSessionDidFinishEvents:) name:@"STBackgroundURLSessionDidFinishEvents" object:nil];
           }
           - (void)st_backgroundSessionDidFinishEvents:(NSNotification *)notification {
               [[NSNotificationCenter defaultCenter] removeObserver:self name:@"STBackgroundURLSessionDidFinishEvents" object:nil];
@@ -117,7 +117,7 @@ jobs:
               stBackgroundSessionCompletionHandler = nil;
               if (handler) handler();
           }
-"""
+          """
               source = source.replace('\n@end', '\n' + method + '\n@end', 1)
               app_delegate.write_text(source)
           PY
