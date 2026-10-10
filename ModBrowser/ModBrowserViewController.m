@@ -1123,8 +1123,9 @@
     self.searchController.searchBar.placeholder = [NSString stringWithFormat:@"Search %@ on Modrinth", initialTypeLabel];
     [self.sourceControl addTarget:self action:@selector(sourceChanged:) forControlEvents:UIControlEventValueChanged];
     UIBarButtonItem *filtersButton = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"slider.horizontal.3"] style:UIBarButtonItemStylePlain target:self action:@selector(showFilters)];
+    UIBarButtonItem *settingsButton = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"gearshape"] style:UIBarButtonItemStylePlain target:self action:@selector(showModBrowserSettings)];
     UIBarButtonItem *downloadsButton = [[UIBarButtonItem alloc] initWithTitle:@"Downloads" style:UIBarButtonItemStylePlain target:self action:@selector(openDownloadManager)];
-    self.navigationItem.rightBarButtonItems = @[filtersButton, downloadsButton];
+    self.navigationItem.rightBarButtonItems = @[filtersButton, settingsButton, downloadsButton];
     [[STDownloadCoordinator shared] records];
     self.definesPresentationContext = YES;
     self.activity = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
@@ -1370,19 +1371,6 @@
     [m addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"Turbo Downloads: %@",turbo?@"On":@"Off"] style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
         BOOL on=![d boolForKey:@"ModBrowserTurboDownloadsEnabled"];[d setBool:on forKey:@"ModBrowserTurboDownloadsEnabled"];
         [self showMessage:on?@"Turbo Downloads enabled for future downloads. It cannot bypass host or network limits.":@"Turbo Downloads disabled." title:@"Download settings"];
-    }]];
-    BOOL iconCaching = [self iconCachingEnabled];
-    [m addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"Image Cache: %@", iconCaching ? @"On" : @"Off"] style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-        BOOL enabled = ![self iconCachingEnabled];
-        [d setBool:enabled forKey:@"STModBrowserIconCachingEnabled"];
-        if (!enabled) {
-            [self clearIconCache];
-        } else {
-            [self showMessage:@"Image caching enabled. Mod icons will be saved for faster repeat visits." title:@"Image Cache"];
-        }
-    }]];
-    [m addAction:[UIAlertAction actionWithTitle:@"Clear Image Cache" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
-        [self clearIconCache];
     }]];
     [m addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];if(m.popoverPresentationController)m.popoverPresentationController.barButtonItem=self.navigationItem.rightBarButtonItem;[self presentViewController:m animated:YES completion:nil];
 }
