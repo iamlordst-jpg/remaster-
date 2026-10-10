@@ -137,8 +137,7 @@
 - (void)deleteRecord:(NSDictionary *)record {
     NSString *identifier = [record[@"id"] description] ?: @"";
     NSNumber *taskIdentifier = record[@"taskIdentifier"];
-    {
-        [self.session getTasksWithCompletionHandler:^(NSArray<NSURLSessionDataTask *> *dataTasks, NSArray<NSURLSessionUploadTask *> *uploadTasks, NSArray<NSURLSessionDownloadTask *> *downloadTasks) {
+    [self.session getTasksWithCompletionHandler:^(NSArray<NSURLSessionDataTask *> *dataTasks, NSArray<NSURLSessionUploadTask *> *uploadTasks, NSArray<NSURLSessionDownloadTask *> *downloadTasks) {
             for (NSURLSessionDownloadTask *task in downloadTasks) {
                 NSDictionary *taskRecord = [self recordForTask:task];
                 if ([[taskRecord[@"id"] description] isEqualToString:identifier] || task.taskIdentifier == taskIdentifier.integerValue) {
@@ -148,7 +147,6 @@
                 }
             }
         }];
-    }
     NSString *destination = record[@"destination"];
     if (destination.length) [NSFileManager.defaultManager removeItemAtPath:destination error:nil];
     NSMutableArray *records = [self mutableRecords];
@@ -1164,7 +1162,6 @@
         for (NSUInteger i=0;i<items.count;i++) if ([[items[i][@"project_id"] description] isEqualToString:projectID]) { found=i; break; }
         if (found == NSNotFound) [items addObject:project]; else [items removeObjectAtIndex:found];
         [defaults setObject:items forKey:@"STModFavorites"];
-        favorite.title = found == NSNotFound ? @"Saved" : @"Removed";
         completionHandler(YES);
     }];
     favorite.backgroundColor = UIColor.systemPinkColor;
