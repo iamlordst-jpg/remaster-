@@ -2,6 +2,325 @@
 #import "ModBrowserViewController.h"
 #import "PLProfiles.h"
 
+
+@interface STDownloadCoordinator : NSObject <NSURLSessionDownloadDelegate>
+@property(nonatomic) NSURLSession *session;
++ (instancetype)shared;
+- (void)startURL:(NSURL *)url destination:(NSString *)destination filename:(NSString *)filename title:(NSString *)title project:(NSDictionary *)project turbo:(BOOL)turbo;
+- (NSArray<NSDictionary *> *)records;
+- (void)deleteRecord:(NSDictionary *)record;
+@end
+
+@implementation STDownloadCoordinator
++ (instancetype)shared {
+    static STDownloadCoordinator *instance;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{ instance = [[STDownloadCoordinator alloc] init]; });
+    return instance;
+}
+- (instancetype)init {
+    self = [super init];
+    if (self) {
+        NSURLSessionConfiguration *configuration = [NSURLSessionConfiguration backgroundSessionConfigurationWithIdentifier:@"com.st.stlauncher.modbrowser.downloads"];
+        configuration.sessionSendsLaunchEvents = YES;
+        configuration.discretionary = NO;
+        configuration.waitsForConnectivity = YES;
+        configuration.timeoutIntervalForResource = 60 * 60 * 6;
+        configuration.HTTPMaximumConnectionsPerHost = [[NSUserDefaults standardUserDefaults] boolForKey:@"ModBrowserTurboDownloadsEnabled"] ? 12 : 8;
+        _session = [NSURLSession sessionWithConfiguration:configuration delegate:self delegateQueue:nil];
+    }
+    return self;
+}
+- (NSMutableArray<NSDictionary *> *)mutableRecords {
+    NSArray *saved = [[NSUserDefaults standardUserDefaults] arrayForKey:@"STModDownloadRecords"];
+    return saved ? [saved mutableCopy] : [NSMutableArray array];
+}
+- (NSArray<NSDictionary *> *)records {
+    return [[self mutableRecords] sortedArrayUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+        return [([b[@"created"] description] ?: @"") compare:([a[@"created"] description] ?: @"")];
+    }];
+}
+- (void)saveRecords:(NSArray<NSDictionary *> *)records {
+    [[NSUserDefaults standardUserDefaults] setObject:records forKey:@"STModDownloadRecords"];
+}
+- (void)updateRecord:(NSDictionary *)record {
+    NSMutableArray *records = [self mutableRecords];
+    NSString *identifier = [record[@"id"] description] ?: @"";
+    NSUInteger found = NSNotFound;
+    for (NSUInteger i = 0; i < records.count; i++) if ([[records[i][@"id"] description] isEqualToString:identifier]) { found = i; break; }
+    if (found == NSNotFound) [records insertObject:record atIndex:0]; else records[found] = record;
+    [self saveRecords:records];
+    [[NSNotificationCenter defaultCenter] postNotificationName:@"STModDownloadsChanged" object:nil];
+}
+- (void)startURL:(NSURL *)url destination:(NSString *)destination filename:(NSString *)filename title:(NSString *)title project:(NSDictionary *)project turbo:(BOOL)turbo {
+    NSError *directoryError = nil;
+    NSString *directory = [destination stringByDeletingLastPathComponent];
+    if (![NSFileManager.defaultManager createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:&directoryError]) {
+        [self updateRecord:@{@"id":[NSUUID.UUID UUIDString], @"title":title ?: filename ?: @"Download", @"filename":filename ?: @"file", @"destination":destination ?: @"", @"status":@"Failed", @"error":directoryError.localizedDescription ?: @"Could not create download folder.", @"created":[NSDate date].description}];
+        return;
+    }
+    if ([NSFileManager.defaultManager fileExistsAtPath:destination]) {
+        [self updateRecord:@{@"id":[NSUUID.UUID UUIDString], @"title":title ?: filename ?: @"Download", @"filename":filename ?: @"file", @"destination":destination ?: @"", @"status":@"Already downloaded", @"created":[NSDate date].description}];
+        return;
+    }
+    NSString *identifier = [NSUUID.UUID UUIDString];
+    NSMutableDictionary *record = [@{@"id":identifier, @"title":title ?: filename ?: @"Download", @"filename":filename ?: @"file", @"destination":destination, @"status":@"Downloading", @"received":@0, @"expected":@0, @"created":[NSDate date].description, @"project":project ?: @{}, @"sourceURL":url.absoluteString ?: @""} mutableCopy];
+    NSData *descriptionData = [NSJSONSerialization dataWithJSONObject:record options:0 error:nil];
+    NSString *taskDescription = descriptionData ? [[NSString alloc] initWithData:descriptionData encoding:NSUTF8StringEncoding] : identifier;
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
+    request.timeoutInterval = 60;
+    [request setValue:@"Amethyst-iOS-ModBrowser/1.4" forHTTPHeaderField:@"User-Agent"];
+    NSURLSessionDownloadTask *task = [self.session downloadTaskWithRequest:request];
+    task.taskDescription = taskDescription;
+    if (turbo) task.priority = NSURLSessionTaskPriorityHigh;
+    record[@"taskIdentifier"] = @(task.taskIdentifier);
+    [self updateRecord:record];
+    [task resume];
+}
+- (NSDictionary *)recordForTask:(NSURLSessionTask *)task {
+    if (!task.taskDescription.length) return nil;
+    NSData *data = [task.taskDescription dataUsingEncoding:NSUTF8StringEncoding];
+    id value = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+    return [value isKindOfClass:NSDictionary.class] ? value : nil;
+}
+- (void)URLSession:(NSURLSession *)session downloadTask:(NSURLSessionDownloadTask *)downloadTask didWriteData:(int64_t)bytesWritten totalBytesWritten:(int64_t)totalBytesWritten totalBytesExpectedToWrite:(int64_t)totalBytesExpectedToWrite {
+    NSMutableDictionary *record = [[self recordForTask:downloadTask] mutableCopy];
+    if (!record) return;
+    record[@"received"] = @(totalBytesWritten);
+    record[@"expected"] = @(totalBytesExpectedToWrite);
+    record[@"status"] = @"Downloading";
+    [self updateRecord:record];
+}
+- (void)URLSession:(NSURLSession *)session downloadTask:(NSURLSessionDownloadTask *)downloadTask didFinishDownloadingToURL:(NSURL *)location {
+    NSMutableDictionary *record = [[self recordForTask:downloadTask] mutableCopy];
+    if (!record) return;
+    NSHTTPURLResponse *response = [downloadTask.response isKindOfClass:NSHTTPURLResponse.class] ? (NSHTTPURLResponse *)downloadTask.response : nil;
+    if (response && (response.statusCode < 200 || response.statusCode >= 300)) {
+        record[@"status"] = @"Failed";
+        record[@"error"] = [NSString stringWithFormat:@"Download server returned HTTP %ld.", (long)response.statusCode];
+        [self updateRecord:record];
+        return;
+    }
+    NSString *destination = record[@"destination"];
+    NSError *error = nil;
+    [NSFileManager.defaultManager createDirectoryAtPath:[destination stringByDeletingLastPathComponent] withIntermediateDirectories:YES attributes:nil error:&error];
+    if (!error && [NSFileManager.defaultManager fileExistsAtPath:destination]) {
+        record[@"status"] = @"Failed";
+        record[@"error"] = @"A file with this name already exists.";
+    } else if (!error && ![NSFileManager.defaultManager moveItemAtURL:location toURL:[NSURL fileURLWithPath:destination] error:&error]) {
+        record[@"status"] = @"Failed";
+        record[@"error"] = error.localizedDescription ?: @"Could not save the downloaded file.";
+    } else if (error) {
+        record[@"status"] = @"Failed";
+        record[@"error"] = error.localizedDescription ?: @"Could not save the downloaded file.";
+    } else {
+        record[@"status"] = @"Downloaded";
+        record[@"received"] = record[@"expected"] ?: record[@"received"] ?: @0;
+        [record removeObjectForKey:@"error"];
+    }
+    [self updateRecord:record];
+}
+- (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error {
+    if (!error) return;
+    NSMutableDictionary *record = [[self recordForTask:task] mutableCopy];
+    if (!record) return;
+    record[@"status"] = [error.domain isEqualToString:NSURLErrorDomain] && error.code == NSURLErrorCancelled ? @"Cancelled" : @"Failed";
+    record[@"error"] = error.localizedDescription ?: @"Download failed.";
+    [self updateRecord:record];
+}
+- (void)URLSessionDidFinishEventsForBackgroundURLSession:(NSURLSession *)session {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [[NSNotificationCenter defaultCenter] postNotificationName:@"STModDownloadsChanged" object:nil];
+    });
+}
+- (void)deleteRecord:(NSDictionary *)record {
+    NSString *identifier = [record[@"id"] description] ?: @"";
+    NSNumber *taskIdentifier = record[@"taskIdentifier"];
+    if (taskIdentifier) {
+        for (NSURLSessionDownloadTask *task in self.session.getTasks) {
+            if (task.taskIdentifier == taskIdentifier.integerValue) { [task cancel]; break; }
+        }
+    }
+    NSString *destination = record[@"destination"];
+    if (destination.length) [NSFileManager.defaultManager removeItemAtPath:destination error:nil];
+    NSMutableArray *records = [self mutableRecords];
+    NSIndexSet *matches = [records indexesOfObjectsPassingTest:^BOOL(NSDictionary *item, NSUInteger idx, BOOL *stop) {
+        return [[item[@"id"] description] isEqualToString:identifier];
+    }];
+    [records removeObjectsAtIndexes:matches];
+    [self saveRecords:records];
+    [[NSNotificationCenter defaultCenter] postNotificationName:@"STModDownloadsChanged" object:nil];
+}
+@end
+
+@interface STDownloadManagerViewController : UITableViewController
+@end
+@implementation STDownloadManagerViewController
+- (instancetype)init { self = [super initWithStyle:UITableViewStyleInsetGrouped]; if (self) self.title = @"Download Manager"; return self; }
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(close)];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(reloadDownloads) name:@"STModDownloadsChanged" object:nil];
+    self.tableView.rowHeight = UITableViewAutomaticDimension;
+    self.tableView.estimatedRowHeight = 70;
+    [self reloadDownloads];
+}
+- (void)dealloc { [[NSNotificationCenter defaultCenter] removeObserver:self]; }
+- (void)close { [self dismissViewControllerAnimated:YES completion:nil]; }
+- (void)reloadDownloads { [self.tableView reloadData]; }
+- (NSArray<NSDictionary *> *)items { return [[STDownloadCoordinator shared] records]; }
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return [self items].count; }
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"st-download"];
+    if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"st-download"];
+    NSDictionary *item = [self items][indexPath.row];
+    cell.textLabel.text = item[@"title"] ?: item[@"filename"] ?: @"Download";
+    cell.textLabel.numberOfLines = 2;
+    NSString *status = item[@"status"] ?: @"Unknown";
+    int64_t received = [item[@"received"] longLongValue], expected = [item[@"expected"] longLongValue];
+    if ([status isEqualToString:@"Downloading"] && expected > 0) status = [NSString stringWithFormat:@"Downloading · %.0f%%", MIN(100.0, (double)received * 100.0 / (double)expected)];
+    else if ([status isEqualToString:@"Downloading"] && received > 0) status = [NSString stringWithFormat:@"Downloading · %@", [NSByteCountFormatter stringFromByteCount:received countStyle:NSByteCountFormatterCountStyleFile]];
+    NSString *error = item[@"error"];
+    cell.detailTextLabel.text = error.length ? [NSString stringWithFormat:@"%@ · %@", status, error] : [NSString stringWithFormat:@"%@ · %@", status, item[@"filename"] ?: @""];
+    cell.detailTextLabel.numberOfLines = 3;
+    cell.detailTextLabel.textColor = [status containsString:@"Failed"] ? UIColor.systemRedColor : UIColor.secondaryLabelColor;
+    cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    return cell;
+}
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    NSDictionary *item = [self items][indexPath.row];
+    NSString *status = item[@"status"] ?: @"";
+    UIAlertController *menu = [UIAlertController alertControllerWithTitle:item[@"filename"] ?: @"Download" message:[NSString stringWithFormat:@"%@\n%@", status, item[@"destination"] ?: @""] preferredStyle:UIAlertControllerStyleActionSheet];
+    if ([status isEqualToString:@"Downloaded"] && [NSFileManager.defaultManager fileExistsAtPath:item[@"destination"] ?: @""]) {
+        [menu addAction:[UIAlertAction actionWithTitle:@"Delete downloaded file…" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+            UIAlertController *confirm = [UIAlertController alertControllerWithTitle:@"Delete file?" message:@"This permanently removes the downloaded file from ST Mod Browser." preferredStyle:UIAlertControllerStyleAlert];
+            [confirm addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+            [confirm addAction:[UIAlertAction actionWithTitle:@"Delete" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) { [[STDownloadCoordinator shared] deleteRecord:item]; }]];
+            [self presentViewController:confirm animated:YES completion:nil];
+        }]];
+    } else {
+        [menu addAction:[UIAlertAction actionWithTitle:@"Remove from history" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) { [[STDownloadCoordinator shared] deleteRecord:item]; }]];
+    }
+    [menu addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    if (menu.popoverPresentationController) { menu.popoverPresentationController.sourceView = tableView; menu.popoverPresentationController.sourceRect = [tableView rectForRowAtIndexPath:indexPath]; }
+    [self presentViewController:menu animated:YES completion:nil];
+}
+@end
+
+@interface STModLibraryViewController : UITableViewController
+@property(nonatomic) NSArray<NSDictionary *> *projects;
+@property(nonatomic) NSString *libraryMode;
+@property(nonatomic) NSString *collectionName;
+@end
+@implementation STModLibraryViewController
+- (instancetype)init { self = [super initWithStyle:UITableViewStyleInsetGrouped]; if (self) self.title = @"Favorites & Collections"; return self; }
+- (void)viewDidLoad { [super viewDidLoad]; self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(close)]; [self reloadLibrary]; }
+- (void)close { [self dismissViewControllerAnimated:YES completion:nil]; }
+- (NSMutableDictionary *)collections { NSDictionary *saved = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"STModCollections"]; return saved ? [saved mutableCopy] : [NSMutableDictionary dictionary]; }
+- (NSArray *)favorites { NSArray *saved = [[NSUserDefaults standardUserDefaults] arrayForKey:@"STModFavorites"]; return saved ?: @[]; }
+- (void)reloadLibrary {
+    if (self.collectionName.length) {
+        self.title = self.collectionName;
+        self.projects = [self collections][self.collectionName] ?: @[];
+    } else {
+        self.title = @"Favorites & Collections";
+        NSMutableArray *items = [NSMutableArray array];
+        for (NSDictionary *p in [self favorites]) [items addObject:[@{@"_section":@"Favorites"} mutableCopy] ? p : p];
+        self.projects = items;
+    }
+    [self.tableView reloadData];
+}
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return self.collectionName.length ? 1 : 2; }
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section { if (self.collectionName.length) return nil; return section == 0 ? @"Favorites" : @"Collections"; }
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+    if (self.collectionName.length) return self.projects.count;
+    if (section == 0) return [self favorites].count;
+    return [self collections].count;
+}
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"st-library"];
+    if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"st-library"];
+    if (self.collectionName.length || indexPath.section == 0) {
+        NSDictionary *p = self.collectionName.length ? self.projects[indexPath.row] : [self favorites][indexPath.row];
+        cell.textLabel.text = p[@"title"] ?: @"Untitled project";
+        cell.detailTextLabel.text = p[@"description"] ?: p[@"source"] ?: @"";
+        cell.accessoryType = UITableViewCellAccessoryNone;
+    } else {
+        NSString *name = [[self collections].allKeys sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)][indexPath.row];
+        cell.textLabel.text = name;
+        cell.detailTextLabel.text = [NSString stringWithFormat:@"%lu saved projects", (unsigned long)[self collections][name].count];
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    }
+    cell.textLabel.numberOfLines = 2; cell.detailTextLabel.numberOfLines = 2;
+    return cell;
+}
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    if (!self.collectionName.length && indexPath.section == 1) {
+        NSArray *names = [[self collections].allKeys sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
+        if (indexPath.row >= names.count) return;
+        STModLibraryViewController *detail = [[STModLibraryViewController alloc] init]; detail.collectionName = names[indexPath.row];
+        detail.modalPresentationStyle = UIModalPresentationPageSheet;
+        [self.navigationController pushViewController:detail animated:YES];
+        return;
+    }
+    NSDictionary *p = self.collectionName.length ? self.projects[indexPath.row] : [self favorites][indexPath.row];
+    NSString *key = p[@"project_id"] ?: @"";
+    UIAlertController *menu = [UIAlertController alertControllerWithTitle:p[@"title"] ?: @"Saved project" message:@"Manage this saved project." preferredStyle:UIAlertControllerStyleActionSheet];
+    [menu addAction:[UIAlertAction actionWithTitle:@"Remove from favorites" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
+        NSMutableArray *f = [[self favorites] mutableCopy];
+        NSIndexSet *matches = [f indexesOfObjectsPassingTest:^BOOL(NSDictionary *item, NSUInteger idx, BOOL *stop) { return [[item[@"project_id"] description] isEqualToString:key]; }];
+        [f removeObjectsAtIndexes:matches]; [[NSUserDefaults standardUserDefaults] setObject:f forKey:@"STModFavorites"]; [self reloadLibrary];
+    }]];
+    if (self.collectionName.length) [menu addAction:[UIAlertAction actionWithTitle:@"Remove from collection" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
+        NSMutableDictionary *c = [self collections]; NSMutableArray *arr = [c[self.collectionName] mutableCopy] ?: [NSMutableArray array];
+        NSIndexSet *matches = [arr indexesOfObjectsPassingTest:^BOOL(NSDictionary *item, NSUInteger idx, BOOL *stop) { return [[item[@"project_id"] description] isEqualToString:key]; }];
+        [arr removeObjectsAtIndexes:matches]; c[self.collectionName] = arr; [[NSUserDefaults standardUserDefaults] setObject:c forKey:@"STModCollections"]; [self reloadLibrary];
+    }]];
+    [menu addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    if (menu.popoverPresentationController) { menu.popoverPresentationController.sourceView = tableView; menu.popoverPresentationController.sourceRect = [tableView rectForRowAtIndexPath:indexPath]; }
+    [self presentViewController:menu animated:YES completion:nil];
+}
+@end
+
+@interface STModCollectionPicker : NSObject
++ (void)presentFrom:(UIViewController *)controller project:(NSDictionary *)project;
+@end
+@implementation STModCollectionPicker
++ (void)presentFrom:(UIViewController *)controller project:(NSDictionary *)project {
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    NSMutableDictionary *collections = [[defaults dictionaryForKey:@"STModCollections"] mutableCopy] ?: [NSMutableDictionary dictionary];
+    UIAlertController *picker = [UIAlertController alertControllerWithTitle:@"Add to collection" message:@"Choose a collection or create a new one." preferredStyle:UIAlertControllerStyleActionSheet];
+    NSArray *names = [collections.allKeys sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
+    for (NSString *name in names) [picker addAction:[UIAlertAction actionWithTitle:name style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        NSMutableArray *items = [collections[name] mutableCopy] ?: [NSMutableArray array];
+        NSString *pid = project[@"project_id"] ?: @"";
+        BOOL exists = NO; for (NSDictionary *item in items) if ([[item[@"project_id"] description] isEqualToString:pid]) exists = YES;
+        if (!exists) [items addObject:project];
+        collections[name] = items; [defaults setObject:collections forKey:@"STModCollections"];
+        UIAlertController *done = [UIAlertController alertControllerWithTitle:@"Saved to collection" message:name preferredStyle:UIAlertControllerStyleAlert]; [done addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]]; [controller presentViewController:done animated:YES completion:nil];
+    }]];
+    [picker addAction:[UIAlertAction actionWithTitle:@"＋ New collection…" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        UIAlertController *create = [UIAlertController alertControllerWithTitle:@"New collection" message:@"Give this collection a name." preferredStyle:UIAlertControllerStyleAlert];
+        [create addTextFieldWithConfigurationHandler:^(UITextField *field) { field.placeholder = @"e.g. Performance mods"; field.autocapitalizationType = UITextAutocapitalizationTypeWords; }];
+        [create addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+        [create addAction:[UIAlertAction actionWithTitle:@"Create" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+            NSString *name = [create.textFields.firstObject.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+            if (!name.length) return;
+            NSMutableDictionary *latest = [[defaults dictionaryForKey:@"STModCollections"] mutableCopy] ?: [NSMutableDictionary dictionary];
+            NSMutableArray *items = [latest[name] mutableCopy] ?: [NSMutableArray array];
+            NSString *pid = project[@"project_id"] ?: @"";
+            BOOL exists = NO; for (NSDictionary *item in items) if ([[item[@"project_id"] description] isEqualToString:pid]) exists = YES;
+            if (!exists) [items addObject:project]; latest[name] = items; [defaults setObject:latest forKey:@"STModCollections"];
+        }]];
+        [controller presentViewController:create animated:YES completion:nil];
+    }]];
+    [picker addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [controller presentViewController:picker animated:YES completion:nil];
+}
+@end
+
 @interface ModProjectCell : UITableViewCell
 @property(nonatomic) UIImageView *modIcon;
 @property(nonatomic) UILabel *nameLabel;
@@ -699,6 +1018,7 @@
 @property(nonatomic) NSDate *activeDownloadStartedAt;
 @property(nonatomic) NSString *activeDownloadFilename;
 @property(nonatomic) NSString *activeDownloadFolderName;
+@property(nonatomic) UIBarButtonItem *downloadManagerButton;
 @end
 
 @implementation ModBrowserViewController
@@ -765,6 +1085,9 @@
     self.searchController.searchBar.placeholder = [NSString stringWithFormat:@"Search %@ on Modrinth", initialTypeLabel];
     [self.sourceControl addTarget:self action:@selector(sourceChanged:) forControlEvents:UIControlEventValueChanged];
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"slider.horizontal.3"] style:UIBarButtonItemStylePlain target:self action:@selector(showFilters)];
+    self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Downloads" style:UIBarButtonItemStylePlain target:self action:@selector(openDownloadManager)];
+    self.navigationItem.leftBarButtonItems = @[[[UIBarButtonItem alloc] initWithTitle:@"Downloads" style:UIBarButtonItemStylePlain target:self action:@selector(openDownloadManager)], [[UIBarButtonItem alloc] initWithTitle:@"Library" style:UIBarButtonItemStylePlain target:self action:@selector(openLibrary)]];
+    [[STDownloadCoordinator shared] records];
     self.definesPresentationContext = YES;
     self.activity = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
     self.tableView.tableFooterView = [[UIView alloc] initWithFrame:CGRectZero];
@@ -788,6 +1111,42 @@
     self.browserHeaderTitle.frame=CGRectMake(16,3,MAX(0,width-32),26);
     self.browserHeaderSubtitle.frame=CGRectMake(16,29,MAX(0,width-32),18);
     self.sourceControl.frame=CGRectMake(16,52,MAX(0,width-32),32);self.sourceControl.selectedSegmentTintColor=nil;
+}
+
+
+- (void)openDownloadManager {
+    STDownloadManagerViewController *manager = [[STDownloadManagerViewController alloc] init];
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:manager];
+    nav.modalPresentationStyle = UIModalPresentationPageSheet;
+    [self presentViewController:nav animated:YES completion:nil];
+}
+- (void)openLibrary {
+    STModLibraryViewController *library = [[STModLibraryViewController alloc] init];
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:library];
+    nav.modalPresentationStyle = UIModalPresentationPageSheet;
+    [self presentViewController:nav animated:YES completion:nil];
+}
+- (NSArray<UIContextualAction *> *)tableView:(UITableView *)tableView trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
+    if (indexPath.row >= self.projects.count) return @[];
+    NSDictionary *project = self.projects[indexPath.row];
+    NSString *projectID = project[@"project_id"] ?: @"";
+    UIContextualAction *favorite = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal title:@"Favorite" handler:^(UIContextualAction *action, UIView *sourceView, void (^completionHandler)(BOOL)) {
+        NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+        NSMutableArray *items = [[defaults arrayForKey:@"STModFavorites"] mutableCopy] ?: [NSMutableArray array];
+        NSUInteger found = NSNotFound;
+        for (NSUInteger i=0;i<items.count;i++) if ([[items[i][@"project_id"] description] isEqualToString:projectID]) { found=i; break; }
+        if (found == NSNotFound) [items addObject:project]; else [items removeObjectAtIndex:found];
+        [defaults setObject:items forKey:@"STModFavorites"];
+        favorite.title = found == NSNotFound ? @"Saved" : @"Removed";
+        completionHandler(YES);
+    }];
+    favorite.backgroundColor = UIColor.systemPinkColor;
+    UIContextualAction *collection = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal title:@"Collection" handler:^(UIContextualAction *action, UIView *sourceView, void (^completionHandler)(BOOL)) {
+        [STModCollectionPicker presentFrom:self project:project];
+        completionHandler(YES);
+    }];
+    collection.backgroundColor = UIColor.systemIndigoColor;
+    return @[[UISwipeActionsConfiguration configurationWithActions:@[collection, favorite]]].firstObject.actions;
 }
 
 - (void)sourceChanged:(UISegmentedControl *)sender {
@@ -941,6 +1300,12 @@
         BOOL on=![d boolForKey:@"ModBrowserAdvancedSearchEnabled"];[d setBool:on forKey:@"ModBrowserAdvancedSearchEnabled"];
         if(!on){self.projectType=@"mod";self.environmentFilter=@"any";[d setObject:@"mod" forKey:@"ModBrowserProjectType"];[d setObject:@"any" forKey:@"ModBrowserEnvironmentFilter"];}
         self.searchController.searchBar.placeholder=[NSString stringWithFormat:@"Search %@ on %@",[self projectTypeLabel],self.curseForgeSource?@"CurseForge":@"Modrinth"];[self searchForProjectsReset:YES];
+    }]];
+    BOOL backgroundDownloads = [d boolForKey:@"STBackgroundDownloadsEnabled"];
+    [m addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"Background Downloads: %@", backgroundDownloads ? @"On" : @"Off"] style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        BOOL enabled = ![d boolForKey:@"STBackgroundDownloadsEnabled"];
+        [d setBool:enabled forKey:@"STBackgroundDownloadsEnabled"];
+        [self showMessage:enabled ? @"Background downloads enabled. Transfers appear in Download Manager and can continue when you leave the browser.":@"Background downloads disabled. New downloads will use the in-screen downloader." title:@"Background Downloads"];
     }]];
     [m addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"Turbo Downloads: %@",turbo?@"On":@"Off"] style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
         BOOL on=![d boolForKey:@"ModBrowserTurboDownloadsEnabled"];[d setBool:on forKey:@"ModBrowserTurboDownloadsEnabled"];
@@ -1143,60 +1508,61 @@
 - (void)downloadVersion:(NSDictionary *)version project:(NSDictionary *)project {
     NSDictionary *file = nil;
     NSArray *files = [version[@"files"] isKindOfClass:NSArray.class] ? version[@"files"] : @[];
-    for (NSDictionary *candidate in files) {
-        NSString *filename = candidate[@"filename"] ?: @"";
-        if ([filename.lowercaseString hasSuffix:@".jar"] && [candidate[@"primary"] boolValue]) { file = candidate; break; }
-    }
-    if (!file) for (NSDictionary *candidate in files) {
-        if ([[candidate[@"filename"] lowercaseString] hasSuffix:@".jar"]) { file = candidate; break; }
-    }
     NSString *projectType = [project[@"project_type"] isKindOfClass:NSString.class] ? project[@"project_type"] : self.projectType;
     NSString *targetExtension = [projectType isEqualToString:@"mod"] ? @".jar" : @".zip";
-    if (!file || ![[file[@"filename"] lowercaseString] hasSuffix:targetExtension]) {
-        file = nil;
-        for (NSDictionary *candidate in files) if ([[candidate[@"filename"] lowercaseString] hasSuffix:targetExtension]) { file = candidate; break; }
-    }
+    for (NSDictionary *candidate in files) if ([[candidate[@"filename"] lowercaseString] hasSuffix:targetExtension] && [candidate[@"primary"] boolValue]) { file = candidate; break; }
+    if (!file) for (NSDictionary *candidate in files) if ([[candidate[@"filename"] lowercaseString] hasSuffix:targetExtension]) { file = candidate; break; }
     if (!file) { [self showMessage:[NSString stringWithFormat:@"No downloadable %@ file was found for this version.", targetExtension] title:@"Download unavailable"]; return; }
     NSURL *url = [NSURL URLWithString:file[@"url"] ?: @""];
     if (!url || !url.scheme.length) { [self showMessage:@"This version has no accessible download URL." title:@"Download failed"]; return; }
     NSString *directory = [self downloadDirectoryForProjectType:projectType];
-    NSString *folderName = directory.lastPathComponent ?: @"mods";
-    self.activeDownloadFolderName = folderName;
-    NSError *directoryError = nil;
-    if (![NSFileManager.defaultManager createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:&directoryError]) {
-        [self showMessage:directoryError.localizedDescription ?: @"Could not create the mods folder." title:@"Cannot create mods folder"];
-        return;
-    }
     NSString *filename = file[@"filename"] ?: url.lastPathComponent;
     NSString *destination = [directory stringByAppendingPathComponent:filename];
-    if ([NSFileManager.defaultManager fileExistsAtPath:destination]) {
-        [self showMessage:[NSString stringWithFormat:@"%@ is already downloaded.", filename] title:@"Already downloaded"];
+    BOOL background = [[NSUserDefaults standardUserDefaults] boolForKey:@"STBackgroundDownloadsEnabled"];
+    if (background) {
+        [[STDownloadCoordinator shared] startURL:url destination:destination filename:filename title:project[@"title"] ?: filename project:project turbo:[[NSUserDefaults standardUserDefaults] boolForKey:@"ModBrowserTurboDownloadsEnabled"]];
+        [self showMessage:[NSString stringWithFormat:@"%@ was added to the Download Manager. You can leave this screen while it downloads.", filename] title:@"Download started"];
         return;
     }
-    NSString *downloadTitle = @"Downloading mod…";
-    NSString *downloadMessage = [NSString stringWithFormat:@"%@\n\nPreparing download…\nSaving to Mod Browser/%@.", filename, folderName];
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:downloadTitle message:downloadMessage preferredStyle:UIAlertControllerStyleAlert];
-    self.activeDownloadAlert = alert;
-    self.activeDownloadFilename = filename;
+    NSError *directoryError = nil;
+    if (![NSFileManager.defaultManager createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:&directoryError]) {
+        [self showMessage:directoryError.localizedDescription ?: @"Could not create the download folder." title:@"Cannot create folder"]; return;
+    }
+    if ([NSFileManager.defaultManager fileExistsAtPath:destination]) {
+        [self showMessage:[NSString stringWithFormat:@"%@ is already downloaded.", filename] title:@"Already downloaded"]; return;
+    }
+    BOOL turbo = [[NSUserDefaults standardUserDefaults] boolForKey:@"ModBrowserTurboDownloadsEnabled"];
+    NSURLSessionConfiguration *configuration = [NSURLSessionConfiguration.defaultSessionConfiguration copy];
+    configuration.requestCachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
+    configuration.timeoutIntervalForResource = turbo ? 240 : 180;
+    configuration.HTTPMaximumConnectionsPerHost = turbo ? 12 : 8;
+    configuration.URLCache = nil;
+    NSURLSession *session = [NSURLSession sessionWithConfiguration:configuration];
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url]; request.timeoutInterval = 45;
+    [request setValue:@"Amethyst-iOS-ModBrowser/1.4" forHTTPHeaderField:@"User-Agent"];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Downloading…" message:filename preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Close" style:UIAlertActionStyleCancel handler:nil]];
     [self presentViewController:alert animated:YES completion:nil];
-    NSDate *downloadStartedAt = [NSDate date];self.activeDownloadStartedAt=downloadStartedAt;
-    BOOL turboDownloads=[[NSUserDefaults standardUserDefaults] boolForKey:@"ModBrowserTurboDownloadsEnabled"];
-    NSURLSessionConfiguration *configuration=NSURLSessionConfiguration.defaultSessionConfiguration;
-    configuration.requestCachePolicy=NSURLRequestReloadIgnoringLocalCacheData;configuration.timeoutIntervalForResource=turboDownloads?240:180;
-    configuration.HTTPMaximumConnectionsPerHost=turboDownloads?12:8;configuration.URLCache=nil;
-    NSURLSession *session=[NSURLSession sessionWithConfiguration:configuration];
-    NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:url];request.timeoutInterval=45;
-    [request setValue:@"Amethyst-iOS-ModBrowser/1.3" forHTTPHeaderField:@"User-Agent"];
-    NSURLSessionDownloadTask *task=[session downloadTaskWithRequest:request completionHandler:^(NSURL *location,NSURLResponse *response,NSError *error){
-        NSError *downloadError=error;
-        if(!downloadError&&[response isKindOfClass:NSHTTPURLResponse.class]){NSInteger code=((NSHTTPURLResponse *)response).statusCode;if(code<200||code>=300)downloadError=[NSError errorWithDomain:@"ModBrowserDownload" code:code userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"The download server returned HTTP %ld.",(long)code]}];}
-        if(!downloadError&&!location)downloadError=[NSError errorWithDomain:@"ModBrowserDownload" code:5 userInfo:@{NSLocalizedDescriptionKey:@"The download did not return a file."}];
-        if(!downloadError&&location){NSString *tmp=[destination stringByAppendingString:@".download"];[NSFileManager.defaultManager removeItemAtPath:tmp error:nil];[NSFileManager.defaultManager moveItemAtURL:location toURL:[NSURL fileURLWithPath:tmp] error:&downloadError];if(!downloadError)[NSFileManager.defaultManager moveItemAtPath:tmp toPath:destination error:&downloadError];if(downloadError)[NSFileManager.defaultManager removeItemAtPath:tmp error:nil];}
-        dispatch_async(dispatch_get_main_queue(),^{[self.downloadProgressTimer invalidate];self.downloadProgressTimer=nil;self.activeDownloadTask=nil;self.activeDownloadAlert=nil;self.activeDownloadStartedAt=nil;self.activeDownloadFolderName=nil;
-            [alert dismissViewControllerAnimated:YES completion:^{if(downloadError)[self showMessage:downloadError.localizedDescription?:@"Download failed." title:@"Download failed"];else [self showMessage:[NSString stringWithFormat:@"%@ was downloaded to:\n%@",filename,directory] title:@"Download complete"];}];});
+    NSURLSessionDownloadTask *task = [session downloadTaskWithRequest:request completionHandler:^(NSURL *location, NSURLResponse *response, NSError *error) {
+        NSError *saveError = error;
+        if (!saveError && [response isKindOfClass:NSHTTPURLResponse.class]) {
+            NSInteger code = ((NSHTTPURLResponse *)response).statusCode;
+            if (code < 200 || code >= 300) saveError = [NSError errorWithDomain:@"ModBrowserDownload" code:code userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"Download server returned HTTP %ld.", (long)code]}];
+        }
+        if (!saveError && location) {
+            [NSFileManager.defaultManager createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:&saveError];
+            if (!saveError && ![NSFileManager.defaultManager moveItemAtURL:location toURL:[NSURL fileURLWithPath:destination] error:&saveError]) {}
+        } else if (!saveError) saveError = [NSError errorWithDomain:@"ModBrowserDownload" code:5 userInfo:@{NSLocalizedDescriptionKey:@"The server did not return a file."}];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [session finishTasksAndInvalidate];
+            [alert dismissViewControllerAnimated:YES completion:^{
+                if (saveError) [self showMessage:saveError.localizedDescription ?: @"Download failed." title:@"Download failed"];
+                else [self showMessage:[NSString stringWithFormat:@"%@ was downloaded to:\n%@", filename, directory] title:@"Download complete"];
+            }];
+        });
     }];
-    self.activeDownloadTask=task;self.downloadProgressTimer=[NSTimer scheduledTimerWithTimeInterval:0.4 target:self selector:@selector(updateDownloadProgress) userInfo:nil repeats:YES];
-    if(turboDownloads)task.priority=NSURLSessionTaskPriorityHigh;[task resume];
+    if (turbo) task.priority = NSURLSessionTaskPriorityHigh;
+    [task resume];
 }
 - (void)updateDownloadProgress {
     NSURLSessionDownloadTask *task = self.activeDownloadTask;
@@ -1204,17 +1570,7 @@
     if (!task || !alert || !alert.presentingViewController) return;
     int64_t received = task.countOfBytesReceived;
     int64_t expected = task.countOfBytesExpectedToReceive;
-    NSTimeInterval elapsed = self.activeDownloadStartedAt ? [[NSDate date] timeIntervalSinceDate:self.activeDownloadStartedAt] : 0;
-    double speedKB = elapsed > 0 ? ((double)received / 1024.0 / elapsed) : 0;
-    NSString *progress = expected > 0
-        ? [NSString stringWithFormat:@"%.0f%%  •  %@ / %@", MIN(100.0, ((double)received / (double)expected) * 100.0),
-            [NSByteCountFormatter stringFromByteCount:received countStyle:NSByteCountFormatterCountStyleFile],
-            [NSByteCountFormatter stringFromByteCount:expected countStyle:NSByteCountFormatterCountStyleFile]]
-        : [NSString stringWithFormat:@"%@ received", [NSByteCountFormatter stringFromByteCount:received countStyle:NSByteCountFormatterCountStyleFile]];
-    NSString *eta = expected > received && speedKB > 0
-        ? [NSString stringWithFormat:@"\nETA: %@", [NSString stringWithFormat:@"%.0f sec", ((double)(expected - received) / 1024.0) / speedKB]]
-        : @"";
-    alert.message = [NSString stringWithFormat:@"%@\n\n%@\nSpeed: %.1f KB/s%@\nSaving to Mod Browser/%@.", self.activeDownloadFilename ?: @"File", progress, speedKB, eta, self.activeDownloadFolderName ?: @"mods"];
+    alert.message = expected > 0 ? [NSString stringWithFormat:@"%@ · %.0f%%", self.activeDownloadFilename ?: @"File", MIN(100.0, (double)received * 100.0 / (double)expected)] : [NSString stringWithFormat:@"%@ · %@", self.activeDownloadFilename ?: @"File", [NSByteCountFormatter stringFromByteCount:received countStyle:NSByteCountFormatterCountStyleFile]];
 }
 - (void)showMessage:(NSString *)message title:(NSString *)title {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:title message:message preferredStyle:UIAlertControllerStyleAlert];
