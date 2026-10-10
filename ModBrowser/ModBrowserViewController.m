@@ -724,6 +724,11 @@
     [self.refreshControl addTarget:self action:@selector(refreshProjects) forControlEvents:UIControlEventValueChanged];
     self.tableView.rowHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedRowHeight = 94;
+    if ([[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalMode"]) {
+        self.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+        self.view.tintColor = [UIColor colorWithRed:0.68 green:0.42 blue:1.0 alpha:1.0];
+        self.tableView.backgroundColor = [UIColor colorWithRed:0.055 green:0.045 blue:0.085 alpha:1.0];
+    }
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchController.searchResultsUpdater = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
@@ -869,6 +874,10 @@
                 if (!self.projects.count) self.tableView.backgroundView = [self messageView:self.curseForgeSource ? @"Couldn’t load CurseForge. Check the API key and connection, then pull to retry." : @"Couldn’t load Modrinth. Check your connection and pull to retry."];
             } else {
                 [self.projects addObjectsFromArray:hits ?: @[]];
+                if ([[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalPrefetchThumbnails"]) {
+                    NSUInteger prefetchCount = MIN(self.projects.count, self.offset + (hits ?: @[]).count + 8);
+                    for (NSUInteger i = self.offset; i < prefetchCount; i++) [self prefetchThumbnailForProject:self.projects[i]];
+                }
                 self.totalHits = total; self.offset = self.projects.count;
                 self.tableView.backgroundView = self.projects.count ? nil : [self messageView:@"No mods found. Try another search or change your loader/version filters."];
             }
@@ -935,6 +944,42 @@
     if (alert.popoverPresentationController) alert.popoverPresentationController.barButtonItem = self.navigationItem.rightBarButtonItem;
     [self presentViewController:alert animated:YES completion:nil];
 }
+- (void)prefetchThumbnailForProject:(NSDictionary *)project {
+    NSString *iconURL = [project[@"icon_url"] isKindOfClass:NSString.class] ? project[@"icon_url"] : @"";
+    if (!iconURL.length || [self.iconCache objectForKey:iconURL] || self.iconTasks[iconURL]) return;
+    NSURL *url = [NSURL URLWithString:iconURL];
+    if (!url) return;
+    __weak typeof(self) weakSelf = self;
+    NSURLSessionDataTask *task = [NSURLSession.sharedSession dataTaskWithURL:url completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        UIImage *image = data && !error ? [UIImage imageWithData:data] : nil;
+        UIImage *thumbnail = nil;
+        if (image) {
+            CGSize target = CGSizeMake(96, 96);
+            UIGraphicsImageRendererFormat *format = [[UIGraphicsImageRendererFormat alloc] init];
+            format.scale = 1.0;
+            UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:target format:format];
+            thumbnail = [renderer imageWithActions:^(UIGraphicsImageRendererContext *context) {
+                CGFloat scale = MIN(target.width / MAX(image.size.width, 1), target.height / MAX(image.size.height, 1));
+                CGSize fitted = CGSizeMake(image.size.width * scale, image.size.height * scale);
+                CGRect rect = CGRectMake((target.width - fitted.width) / 2.0, (target.height - fitted.height) / 2.0, fitted.width, fitted.height);
+                [image drawInRect:rect];
+            }];
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            __strong typeof(weakSelf) self = weakSelf;
+            if (!self) return;
+            [self.iconTasks removeObjectForKey:iconURL];
+            if (!thumbnail) return;
+            [self.iconCache setObject:thumbnail forKey:iconURL];
+            for (ModProjectCell *visible in self.tableView.visibleCells) {
+                NSIndexPath *path = [self.tableView indexPathForCell:visible];
+                if (path && path.row < self.projects.count && [self.projects[path.row][@"icon_url"] isEqualToString:iconURL]) visible.modIcon.image = thumbnail;
+            }
+        });
+    }];
+    self.iconTasks[iconURL] = task;
+    [task resume];
+}
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return self.projects.count; }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     ModProjectCell *cell = [tableView dequeueReusableCellWithIdentifier:@"modrinth-project"];
@@ -993,6 +1038,11 @@
             self.iconTasks[iconURL] = task;
             [task resume];
         }
+    }
+    if ([[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalCompactResults"]) {
+        cell.descriptionLabel.numberOfLines = 1;
+    } else {
+        cell.descriptionLabel.numberOfLines = 2;
     }
     if (indexPath.row >= self.projects.count - 2 && self.offset < self.totalHits && !self.loading) [self searchForProjectsReset:NO];
     return cell;
@@ -1139,5 +1189,208 @@
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:title message:message preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
     [self presentViewController:alert animated:YES completion:nil];
+}
+@end
+
+
+#pragma mark - Experimental STLauncher screens
+
+static NSString * const STLauncherModeKey = @"STLauncherExperimentalMode";
+
+@interface STLauncherModeViewController ()
+@property(nonatomic) UISegmentedControl *modeControl;
+@property(nonatomic) UILabel *summaryLabel;
+@end
+
+@implementation STLauncherModeViewController
+- (NSString *)imageName { return @"switch.2"; }
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = @"Launcher";
+    self.view.backgroundColor = UIColor.systemGroupedBackgroundColor;
+    UILabel *title = [[UILabel alloc] init];
+    title.text = @"Choose your launcher";
+    title.font = [UIFont systemFontOfSize:25 weight:UIFontWeightBold];
+    title.numberOfLines = 0;
+    UILabel *subtitle = [[UILabel alloc] init];
+    subtitle.text = @"Amethyst stays the default. STLauncher is experimental and can be switched back at any time.";
+    subtitle.font = [UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];
+    subtitle.textColor = UIColor.secondaryLabelColor;
+    subtitle.numberOfLines = 0;
+    self.modeControl = [[UISegmentedControl alloc] initWithItems:@[@"Amethyst (Default)", @"STLauncher (Experimental)"]];
+    self.modeControl.selectedSegmentIndex = [[NSUserDefaults standardUserDefaults] boolForKey:STLauncherModeKey] ? 1 : 0;
+    [self.modeControl addTarget:self action:@selector(modeChanged:) forControlEvents:UIControlEventValueChanged];
+    self.summaryLabel = [[UILabel alloc] init];
+    self.summaryLabel.numberOfLines = 0;
+    self.summaryLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
+    self.summaryLabel.textColor = UIColor.secondaryLabelColor;
+    [self updateSummary];
+    UIButton *features = [UIButton buttonWithType:UIButtonTypeSystem];
+    [features setTitle:@"Experimental Features  ›" forState:UIControlStateNormal];
+    features.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeading;
+    features.titleLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
+    [features addTarget:self action:@selector(openFeatures) forControlEvents:UIControlEventTouchUpInside];
+    UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[title, subtitle, self.modeControl, self.summaryLabel, features]];
+    stack.translatesAutoresizingMaskIntoConstraints = NO;
+    stack.axis = UILayoutConstraintAxisVertical;
+    stack.spacing = 18;
+    [self.view addSubview:stack];
+    [NSLayoutConstraint activateConstraints:@[
+        [stack.leadingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor constant:22],
+        [stack.trailingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor constant:-22],
+        [stack.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:28]
+    ]];
+}
+- (void)updateSummary {
+    self.summaryLabel.text = self.modeControl.selectedSegmentIndex == 1
+        ? @"STLauncher is selected. Its purple home screen and optional experimental browser features are available. Existing Amethyst screens and the Mod Browser are preserved."
+        : @"Amethyst is selected. The original launcher and its existing Mod Browser remain available.";
+}
+- (void)modeChanged:(UISegmentedControl *)sender {
+    BOOL experimental = sender.selectedSegmentIndex == 1;
+    [[NSUserDefaults standardUserDefaults] setBool:experimental forKey:STLauncherModeKey];
+    [self updateSummary];
+    UIViewController *target = nil;
+    if (experimental) {
+        target = [[STLauncherHomeViewController alloc] init];
+    } else {
+        Class newsClass = NSClassFromString(@"LauncherNewsViewController");
+        target = newsClass ? [[newsClass alloc] init] : nil;
+    }
+    if (target && self.navigationController) {
+        [self.navigationController setViewControllers:@[target] animated:YES];
+    }
+}
+- (void)openFeatures {
+    STLauncherExperimentalFeaturesViewController *features = [[STLauncherExperimentalFeaturesViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];
+    [self.navigationController pushViewController:features animated:YES];
+}
+@end
+
+@interface STLauncherHomeViewController ()
+@property(nonatomic) UIStackView *buttonStack;
+@end
+
+@implementation STLauncherHomeViewController
+- (NSString *)imageName { return @"sparkles"; }
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = @"STLauncher";
+    self.view.backgroundColor = [UIColor colorWithRed:0.055 green:0.045 blue:0.085 alpha:1.0];
+    self.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+    self.navigationController.navigationBar.tintColor = [UIColor colorWithRed:0.75 green:0.55 blue:1.0 alpha:1.0];
+    UILabel *eyebrow = [[UILabel alloc] init];
+    eyebrow.text = @"ST  •  EXPERIMENTAL";
+    eyebrow.font = [UIFont systemFontOfSize:12 weight:UIFontWeightBold];
+    eyebrow.textColor = [UIColor colorWithRed:0.75 green:0.55 blue:1.0 alpha:1.0];
+    UILabel *title = [[UILabel alloc] init];
+    title.text = @"STLauncher";
+    title.font = [UIFont systemFontOfSize:34 weight:UIFontWeightBold];
+    title.textColor = UIColor.whiteColor;
+    UILabel *subtitle = [[UILabel alloc] init];
+    subtitle.text = @"Your Minecraft Java launcher, with a cleaner interface.";
+    subtitle.font = [UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];
+    subtitle.textColor = [UIColor colorWithWhite:0.78 alpha:1.0];
+    subtitle.numberOfLines = 0;
+    UIStackView *intro = [[UIStackView alloc] initWithArrangedSubviews:@[eyebrow, title, subtitle]];
+    intro.axis = UILayoutConstraintAxisVertical;
+    intro.spacing = 8;
+    NSMutableArray *buttons = [NSMutableArray array];
+    NSArray *items = @[
+        @[@"Browse Mods", @"shippingbox", @"ModBrowserViewController"],
+        @[@"Minecraft Profiles", @"person.crop.square", @"LauncherProfilesViewController"],
+        @[@"Amethyst Settings", @"gearshape", @"LauncherPreferencesViewController"]
+    ];
+    for (NSArray *item in items) {
+        UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+        [button setTitle:[NSString stringWithFormat:@"   %@", item[0]] forState:UIControlStateNormal];
+        [button setImage:[UIImage systemImageNamed:item[1]] forState:UIControlStateNormal];
+        button.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeading;
+        button.titleLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
+        button.tintColor = UIColor.whiteColor;
+        button.backgroundColor = [UIColor colorWithRed:0.15 green:0.105 blue:0.23 alpha:1.0];
+        button.layer.cornerRadius = 14;
+        button.contentEdgeInsets = UIEdgeInsetsMake(16, 16, 16, 16);
+        button.tag = [items indexOfObject:item];
+        [button addTarget:self action:@selector(openDestination:) forControlEvents:UIControlEventTouchUpInside];
+        [buttons addObject:button];
+    }
+    UIButton *switchButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [switchButton setTitle:@"Switch to Amethyst (Default)" forState:UIControlStateNormal];
+    switchButton.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeading;
+    switchButton.titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightMedium];
+    switchButton.tintColor = [UIColor colorWithRed:0.8 green:0.7 blue:1.0 alpha:1.0];
+    switchButton.contentEdgeInsets = UIEdgeInsetsMake(12, 4, 12, 4);
+    [switchButton addTarget:self action:@selector(switchToAmethyst) forControlEvents:UIControlEventTouchUpInside];
+    [buttons addObject:switchButton];
+    self.buttonStack = [[UIStackView alloc] initWithArrangedSubviews:buttons];
+    self.buttonStack.axis = UILayoutConstraintAxisVertical;
+    self.buttonStack.spacing = 12;
+    self.buttonStack.translatesAutoresizingMaskIntoConstraints = NO;
+    intro.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:intro];
+    [self.view addSubview:self.buttonStack];
+    [NSLayoutConstraint activateConstraints:@[
+        [intro.leadingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor constant:22],
+        [intro.trailingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor constant:-22],
+        [intro.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:34],
+        [self.buttonStack.leadingAnchor constraintEqualToAnchor:intro.leadingAnchor],
+        [self.buttonStack.trailingAnchor constraintEqualToAnchor:intro.trailingAnchor],
+        [self.buttonStack.topAnchor constraintEqualToAnchor:intro.bottomAnchor constant:32]
+    ]];
+}
+- (void)openDestination:(UIButton *)sender {
+    NSArray *names = @[@"ModBrowserViewController", @"LauncherProfilesViewController", @"LauncherPreferencesViewController"];
+    if (sender.tag < 0 || sender.tag >= names.count) return;
+    Class cls = NSClassFromString(names[sender.tag]);
+    if (!cls) return;
+    UIViewController *destination = [[cls alloc] init];
+    [self.navigationController pushViewController:destination animated:YES];
+}
+- (void)switchToAmethyst {
+    [[NSUserDefaults standardUserDefaults] setBool:NO forKey:STLauncherModeKey];
+    Class newsClass = NSClassFromString(@"LauncherNewsViewController");
+    if (newsClass) [self.navigationController setViewControllers:@[[[newsClass alloc] init]] animated:YES];
+}
+@end
+
+@implementation STLauncherExperimentalFeaturesViewController
+- (NSString *)imageName { return @"flask"; }
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = @"Experimental Features";
+    self.tableView.backgroundColor = UIColor.systemGroupedBackgroundColor;
+    self.tableView.rowHeight = 62;
+    self.tableView.tableFooterView = [[UIView alloc] initWithFrame:CGRectZero];
+}
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return 2; }
+- (NSString *)titleForFeatureAtRow:(NSInteger)row {
+    return row == 0 ? @"Prefetch Thumbnails" : @"Compact Browser Cards";
+}
+- (NSString *)descriptionForFeatureAtRow:(NSInteger)row {
+    return row == 0
+        ? @"Load upcoming mod icons before you scroll to them. Uses extra data and is off by default."
+        : @"Use shorter mod descriptions to fit more results on screen.";
+}
+- (NSString *)keyForFeatureAtRow:(NSInteger)row {
+    return row == 0 ? @"STLauncherExperimentalPrefetchThumbnails" : @"STLauncherExperimentalCompactResults";
+}
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 1; }
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"st-experimental-feature"];
+    if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"st-experimental-feature"];
+    cell.textLabel.text = [self titleForFeatureAtRow:indexPath.row];
+    cell.detailTextLabel.text = [self descriptionForFeatureAtRow:indexPath.row];
+    cell.detailTextLabel.numberOfLines = 0;
+    cell.selectionStyle = UITableViewCellSelectionStyleNone;
+    UISwitch *toggle = [[UISwitch alloc] init];
+    toggle.on = [[NSUserDefaults standardUserDefaults] boolForKey:[self keyForFeatureAtRow:indexPath.row]];
+    toggle.tag = indexPath.row;
+    [toggle addTarget:self action:@selector(toggleFeature:) forControlEvents:UIControlEventValueChanged];
+    cell.accessoryView = toggle;
+    return cell;
+}
+- (void)toggleFeature:(UISwitch *)sender {
+    [[NSUserDefaults standardUserDefaults] setBool:sender.on forKey:[self keyForFeatureAtRow:sender.tag]];
 }
 @end
