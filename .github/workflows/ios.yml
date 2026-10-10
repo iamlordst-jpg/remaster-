@@ -97,26 +97,26 @@ jobs:
               if import_marker not in source: raise SystemExit("Could not locate AppDelegate imports")
               source = source.replace(import_marker, import_marker + '\n\nstatic void (^stBackgroundSessionCompletionHandler)(void);', 1)
               method = """
-// STLauncher background URLSession event bridge
-- (void)application:(UIApplication *)application handleEventsForBackgroundURLSession:(NSString *)identifier completionHandler:(void (^)(void))completionHandler {
-    if (![identifier isEqualToString:@"com.st.stlauncher.modbrowser.downloads"]) {
-        completionHandler();
-        return;
-    }
-    stBackgroundSessionCompletionHandler = [completionHandler copy];
-    Class coordinatorClass = NSClassFromString(@"STDownloadCoordinator");
-    if (coordinatorClass && [coordinatorClass respondsToSelector:NSSelectorFromString(@"shared")]) {
-        [coordinatorClass performSelector:NSSelectorFromString(@"shared")];
-    }
-    [[NSNotificationCenter defaultCenter] removeObserver:self name:@"STBackgroundURLSessionDidFinishEvents" object:nil];
-    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(st_backgroundSessionDidFinishEvents:) name:@"STBackgroundURLSessionDidFinishEvents" object:nil];
-}
-- (void)st_backgroundSessionDidFinishEvents:(NSNotification *)notification {
-    [[NSNotificationCenter defaultCenter] removeObserver:self name:@"STBackgroundURLSessionDidFinishEvents" object:nil];
-    void (^handler)(void) = stBackgroundSessionCompletionHandler;
-    stBackgroundSessionCompletionHandler = nil;
-    if (handler) handler();
-}
+          // STLauncher background URLSession event bridge
+          - (void)application:(UIApplication *)application handleEventsForBackgroundURLSession:(NSString *)identifier completionHandler:(void (^)(void))completionHandler {
+              if (![identifier isEqualToString:@"com.st.stlauncher.modbrowser.downloads"]) {
+                  completionHandler();
+                  return;
+              }
+              stBackgroundSessionCompletionHandler = [completionHandler copy];
+              Class coordinatorClass = NSClassFromString(@"STDownloadCoordinator");
+              if (coordinatorClass && [coordinatorClass respondsToSelector:NSSelectorFromString(@"shared")]) {
+                  [coordinatorClass performSelector:NSSelectorFromString(@"shared")];
+              }
+              [[NSNotificationCenter defaultCenter] removeObserver:self name:@"STBackgroundURLSessionDidFinishEvents" object:nil];
+              [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(st_backgroundSessionDidFinishEvents:) name:@"STBackgroundURLSessionDidFinishEvents" object:nil];
+          }
+          - (void)st_backgroundSessionDidFinishEvents:(NSNotification *)notification {
+              [[NSNotificationCenter defaultCenter] removeObserver:self name:@"STBackgroundURLSessionDidFinishEvents" object:nil];
+              void (^handler)(void) = stBackgroundSessionCompletionHandler;
+              stBackgroundSessionCompletionHandler = nil;
+              if (handler) handler();
+          }
 """
               source = source.replace('\n@end', '\n' + method + '\n@end', 1)
               app_delegate.write_text(source)
