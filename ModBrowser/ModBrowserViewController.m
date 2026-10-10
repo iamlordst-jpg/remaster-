@@ -137,7 +137,7 @@
 - (void)deleteRecord:(NSDictionary *)record {
     NSString *identifier = [record[@"id"] description] ?: @"";
     NSNumber *taskIdentifier = record[@"taskIdentifier"];
-    if (taskIdentifier) {
+    {
         [self.session getTasksWithCompletionHandler:^(NSArray<NSURLSessionDataTask *> *dataTasks, NSArray<NSURLSessionUploadTask *> *uploadTasks, NSArray<NSURLSessionDownloadTask *> *downloadTasks) {
             for (NSURLSessionDownloadTask *task in downloadTasks) {
                 NSDictionary *taskRecord = [self recordForTask:task];
