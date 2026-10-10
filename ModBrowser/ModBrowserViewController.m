@@ -1157,7 +1157,7 @@
     NSString *filename = file[@"filename"] ?: url.lastPathComponent;
     NSString *destination = [directory stringByAppendingPathComponent:filename];
     if ([NSFileManager.defaultManager fileExistsAtPath:destination]) {
-        [self showMessage:[NSString stringWithFormat:@"%@ is already installed.", filename] title:@"Already installed"];
+        [self showMessage:[NSString stringWithFormat:@"%@ is already installed.", filename] title:@"Already downloaded"];
         return;
     }
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Downloading mod…" message:[NSString stringWithFormat:@"%@\n\nSaving to ST Mod Browser/mods.", filename] preferredStyle:UIAlertControllerStyleAlert];
@@ -1186,7 +1186,7 @@
         dispatch_async(dispatch_get_main_queue(), ^{
             [alert dismissViewControllerAnimated:YES completion:^{
                 if (error || moveError) [self showMessage:(error ?: moveError).localizedDescription title:@"Install failed"];
-                else [self showMessage:[NSString stringWithFormat:@"%@ was downloaded to:\n%@", filename, directory] title:@"Mod installed"];
+                else [self showMessage:[NSString stringWithFormat:@"%@ was downloaded to:\n%@", filename, directory] title:@"Download complete"];
             }];
         });
     }];
