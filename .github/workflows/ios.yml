@@ -62,28 +62,28 @@ jobs:
           from pathlib import Path
           cmake = Path("Amethyst-iOS/Natives/CMakeLists.txt")
           source = cmake.read_text()
-          marker = "  LauncherMenuViewController.m\\n"
-          entry = "  ModBrowserViewController.m\\n"
+          marker = "  LauncherMenuViewController.m\n"
+          entry = "  ModBrowserViewController.m\n"
           if entry not in source:
               if marker not in source: raise SystemExit("Could not find native source list in CMakeLists.txt")
               source = source.replace(marker, marker + entry, 1)
               cmake.write_text(source)
           menu = Path("Amethyst-iOS/Natives/LauncherMenuViewController.m")
           source = menu.read_text()
-          im = '#import "LauncherMenuViewController.h"\\n'
-          bi = '#import "ModBrowserViewController.h"\\n'
+          im = '#import "LauncherMenuViewController.h"\n'
+          bi = '#import "ModBrowserViewController.h"\n'
           if bi not in source:
               if im not in source: raise SystemExit("Could not find launcher menu imports")
               source = source.replace(im, im + bi, 1)
-          entry = '        [LauncherMenuCustomItem vcClass:ModBrowserViewController.class],\\n'
+          entry = '        [LauncherMenuCustomItem vcClass:ModBrowserViewController.class],\n'
           if entry not in source:
-              pm = '        [LauncherMenuCustomItem vcClass:LauncherProfilesViewController.class],\\n'
+              pm = '        [LauncherMenuCustomItem vcClass:LauncherProfilesViewController.class],\n'
               if pm not in source: raise SystemExit("Could not find Profiles menu entry")
               source = source.replace(pm, pm + entry, 1)
-          assignment = '        selected.vcArray[0].navigationItem.rightBarButtonItem = self.accountBtnItem;\\n'
-          guarded = ('        if (![selected.vcArray[0] isKindOfClass:ModBrowserViewController.class]) {\\n'
-                     '            selected.vcArray[0].navigationItem.rightBarButtonItem = self.accountBtnItem;\\n'
-                     '        }\\n')
+          assignment = '        selected.vcArray[0].navigationItem.rightBarButtonItem = self.accountBtnItem;\n'
+          guarded = ('        if (![selected.vcArray[0] isKindOfClass:ModBrowserViewController.class]) {\n'
+                     '            selected.vcArray[0].navigationItem.rightBarButtonItem = self.accountBtnItem;\n'
+                     '        }\n')
           if assignment in source: source = source.replace(assignment, guarded, 1)
           elif guarded not in source: raise SystemExit("Could not locate account button assignment")
           menu.write_text(source)
@@ -113,25 +113,25 @@ jobs:
           path: Amethyst-iOS/artifacts/org.angelauramc.amethyst-*-${{ matrix.platform_name }}.ipa
 
       - name: Upload regular tipa
-        uses: actions/upload-artifact@main
+        uses: actions/upload-artifact@v4
         with:
           name: org.angelauramc.amethyst-${{ matrix.platform_name }}-trollstore.tipa
           path: Amethyst-iOS/artifacts/org.angelauramc.amethyst-*-${{ matrix.platform_name }}-trollstore.tipa
 
       - name: Upload slimmed ipa
-        uses: actions/upload-artifact@main
+        uses: actions/upload-artifact@v4
         with:
           name: org.angelauramc.amethyst.slimmed-${{ matrix.platform_name }}.ipa
           path: Amethyst-iOS/artifacts/org.angelauramc.amethyst.slimmed-*-${{ matrix.platform_name }}.ipa
 
       - name: Upload slimmed tipa
-        uses: actions/upload-artifact@main
+        uses: actions/upload-artifact@v4
         with:
           name: org.angelauramc.amethyst.slimmed-${{ matrix.platform_name }}-trollstore.tipa
           path: Amethyst-iOS/artifacts/org.angelauramc.amethyst.slimmed-*-${{ matrix.platform_name }}-trollstore.tipa
 
       - name: Upload PojavLauncher.dSYM
-        uses: actions/upload-artifact@main
+        uses: actions/upload-artifact@v4
         if: matrix.platform_name == 'ios'
         with:
           name: AngelAuraAmethyst.dSYM
