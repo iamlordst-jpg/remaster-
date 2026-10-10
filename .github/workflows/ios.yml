@@ -113,6 +113,14 @@ jobs:
               if failure_marker in source: source = source.replace(failure_marker, failure_code)
               nav.write_text(source)
 
+          # Give the main-menu download progress screen an explicit Close button.
+          progress_vc = Path("Amethyst-iOS/Natives/DownloadProgressViewController.m")
+          source = progress_vc.read_text()
+          icon_close = 'self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(actionClose)];'
+          text_close = 'self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Close" style:UIBarButtonItemStylePlain target:self action:@selector(actionClose)];'
+          if icon_close in source: source = source.replace(icon_close, text_close, 1)
+          progress_vc.write_text(source)
+
           # Reconnect background URLSession events after iOS relaunches the app.
           app_delegate = Path("Amethyst-iOS/Natives/AppDelegate.m")
           source = app_delegate.read_text()
