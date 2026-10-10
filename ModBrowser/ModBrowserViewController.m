@@ -131,6 +131,7 @@
 - (void)URLSessionDidFinishEventsForBackgroundURLSession:(NSURLSession *)session {
     dispatch_async(dispatch_get_main_queue(), ^{
         [[NSNotificationCenter defaultCenter] postNotificationName:@"STModDownloadsChanged" object:nil];
+        [[NSNotificationCenter defaultCenter] postNotificationName:@"STBackgroundURLSessionDidFinishEvents" object:nil];
     });
 }
 - (void)deleteRecord:(NSDictionary *)record {
