@@ -140,7 +140,12 @@
     if (taskIdentifier) {
         [self.session getTasksWithCompletionHandler:^(NSArray<NSURLSessionDataTask *> *dataTasks, NSArray<NSURLSessionUploadTask *> *uploadTasks, NSArray<NSURLSessionDownloadTask *> *downloadTasks) {
             for (NSURLSessionDownloadTask *task in downloadTasks) {
-                if (task.taskIdentifier == taskIdentifier.integerValue) { [task cancel]; break; }
+                NSDictionary *taskRecord = [self recordForTask:task];
+                if ([[taskRecord[@"id"] description] isEqualToString:identifier] || task.taskIdentifier == taskIdentifier.integerValue) {
+                    task.taskDescription = nil;
+                    [task cancel];
+                    break;
+                }
             }
         }];
     }
@@ -171,7 +176,28 @@
 - (void)dealloc { [[NSNotificationCenter defaultCenter] removeObserver:self]; }
 - (void)close { [self dismissViewControllerAnimated:YES completion:nil]; }
 - (void)reloadDownloads { [self.tableView reloadData]; }
-- (NSArray<NSDictionary *> *)items { return [[STDownloadCoordinator shared] records]; }
+- (NSArray<NSDictionary *> *)items {
+    NSMutableArray<NSDictionary *> *items = [[[STDownloadCoordinator shared] records] mutableCopy];
+    NSMutableSet<NSString *> *knownPaths = [NSMutableSet set];
+    for (NSDictionary *item in items) if ([item[@"destination"] isKindOfClass:NSString.class]) [knownPaths addObject:item[@"destination"]];
+    NSString *base = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/ST Mod Browser"];
+    for (NSString *folder in @[@"mods", @"resourcepacks", @"shaderpacks", @"datapacks"]) {
+        NSString *directory = [base stringByAppendingPathComponent:folder];
+        NSArray *files = [NSFileManager.defaultManager contentsOfDirectoryAtPath:directory error:nil] ?: @[];
+        for (NSString *filename in files) {
+            NSString *path = [directory stringByAppendingPathComponent:filename];
+            BOOL isDirectory = NO;
+            if ([NSFileManager.defaultManager fileExistsAtPath:path isDirectory:&isDirectory] && !isDirectory && ![knownPaths containsObject:path] && ![filename hasSuffix:@".download"]) {
+                NSDictionary *attributes = [NSFileManager.defaultManager attributesOfItemAtPath:path error:nil];
+                [items addObject:@{@"id":[@"file:" stringByAppendingString:path], @"title":filename, @"filename":filename, @"destination":path, @"status":@"Downloaded", @"created":[attributes[NSFileModificationDate] description] ?: @""}];
+                [knownPaths addObject:path];
+            }
+        }
+    }
+    return [items sortedArrayUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+        return [([b[@"created"] description] ?: @"") compare:([a[@"created"] description] ?: @"")];
+    }];
+}
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return [self items].count; }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"st-download"];
@@ -228,9 +254,7 @@
         self.projects = [self collections][self.collectionName] ?: @[];
     } else {
         self.title = @"Favorites & Collections";
-        NSMutableArray *items = [NSMutableArray array];
-        for (NSDictionary *p in [self favorites]) [items addObject:[@{@"_section":@"Favorites"} mutableCopy] ? p : p];
-        self.projects = items;
+        self.projects = [[self favorites] copy];
     }
     [self.tableView reloadData];
 }
