@@ -788,6 +788,7 @@
 @property(nonatomic) NSURLSessionDownloadTask *activeDownloadTask;
 @property(nonatomic) NSDate *activeDownloadStartedAt;
 @property(nonatomic) NSString *activeDownloadFilename;
+@property(nonatomic) NSString *activeDownloadFolderName;
 @end
 
 @implementation ModBrowserViewController
@@ -1372,6 +1373,13 @@
     return [[NSHomeDirectory() stringByAppendingPathComponent:@"Documents/ST Mod Browser"]
         stringByAppendingPathComponent:@"mods"];
 }
+- (NSString *)downloadDirectoryForProjectType:(NSString *)projectType {
+    NSString *base = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/ST Mod Browser"];
+    NSString *folder = [projectType isEqualToString:@"resourcepack"] ? @"resourcepacks" :
+        ([projectType isEqualToString:@"shader"] ? @"shaderpacks" :
+        ([projectType isEqualToString:@"datapack"] ? @"datapacks" : @"mods"));
+    return [base stringByAppendingPathComponent:folder];
+}
 - (void)insertVersionDot:(UIBarButtonItem *)sender {
     UITextField *field = self.customVersionField;
     if (field) [field replaceRange:field.selectedTextRange withText:@"."];
@@ -1396,7 +1404,9 @@
     if (!file) { [self showMessage:[NSString stringWithFormat:@"No downloadable %@ file was found for this version.", targetExtension] title:@"Download unavailable"]; return; }
     NSURL *url = [NSURL URLWithString:file[@"url"] ?: @""];
     if (!url || !url.scheme.length) { [self showMessage:@"This version has no accessible download URL." title:@"Download failed"]; return; }
-    NSString *directory = [self modsDirectoryForSelectedProfile];
+    NSString *directory = [self downloadDirectoryForProjectType:projectType];
+    NSString *folderName = directory.lastPathComponent ?: @"mods";
+    self.activeDownloadFolderName = folderName;
     NSError *directoryError = nil;
     if (![NSFileManager.defaultManager createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:&directoryError]) {
         [self showMessage:directoryError.localizedDescription ?: @"Could not create the mods folder." title:@"Cannot create mods folder"];
@@ -1405,10 +1415,10 @@
     NSString *filename = file[@"filename"] ?: url.lastPathComponent;
     NSString *destination = [directory stringByAppendingPathComponent:filename];
     if ([NSFileManager.defaultManager fileExistsAtPath:destination]) {
-        [self showMessage:[NSString stringWithFormat:@"%@ is already installed.", filename] title:@"Already downloaded"];
+        [self showMessage:[NSString stringWithFormat:@"%@ is already downloaded.", filename] title:@"Already downloaded"];
         return;
     }
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Downloading mod…" message:[NSString stringWithFormat:@"%@\n\nPreparing download…\nSaving to ST Mod Browser/mods.", filename] preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Downloading…" message:[NSString stringWithFormat:@"%@\n\nPreparing download…\nSaving to ST Mod Browser/%@.", filename, folderName] preferredStyle:UIAlertControllerStyleAlert];
     self.activeDownloadAlert = alert;
     self.activeDownloadFilename = filename;
     [self presentViewController:alert animated:YES completion:nil];
@@ -1470,6 +1480,7 @@
             self.activeDownloadTask = nil;
             self.activeDownloadAlert = nil;
             self.activeDownloadStartedAt = nil;
+            self.activeDownloadFolderName = nil;
             NSMutableArray *history = [[[NSUserDefaults standardUserDefaults] arrayForKey:@"STLauncherDownloadHistory"] mutableCopy] ?: [NSMutableArray array];
             BOOL downloadSucceeded = !(error || moveError);
             [history insertObject:@{
@@ -1517,7 +1528,7 @@
     NSString *eta = expected > received && speedKB > 0
         ? [NSString stringWithFormat:@"\nETA: %@", [NSString stringWithFormat:@"%.0f sec", ((double)(expected - received) / 1024.0) / speedKB]]
         : @"";
-    alert.message = [NSString stringWithFormat:@"%@\n\n%@\nSpeed: %.1f KB/s%@\nSaving to ST Mod Browser/mods.", self.activeDownloadFilename ?: @"Mod", progress, speedKB, eta];
+    alert.message = [NSString stringWithFormat:@"%@\n\n%@\nSpeed: %.1f KB/s%@\nSaving to ST Mod Browser/%@.", self.activeDownloadFilename ?: @"File", progress, speedKB, eta, self.activeDownloadFolderName ?: @"mods"];
 }
 - (void)showMessage:(NSString *)message title:(NSString *)title {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:title message:message preferredStyle:UIAlertControllerStyleAlert];
