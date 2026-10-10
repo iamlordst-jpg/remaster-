@@ -1,42 +1,45 @@
-# Amethyst iOS Mod Browser Improvements
+# Amethyst iOS — ST Mod Browser
 
-A community-maintained improvement set for the original Amethyst iOS launcher. The original launcher remains the app experience; this branch adds an integrated mod browser and two optional, stable browser features.
+A community-maintained Mod Browser improvement for the original Amethyst iOS launcher. The goal is to keep the familiar Amethyst experience while making Minecraft mod discovery, filtering, and downloads cleaner and easier to use.
 
-## Mod Browser
+## Features
 
-- Search Minecraft projects on Modrinth.
-- Search CurseForge with a locally stored API key.
-- View project details, galleries, versions, dependencies, and downloadable files.
-- Choose a Minecraft version, mod loader, and result sort order.
-- Use a cleaner header, source selector, and separate filter menus.
-- Thumbnail requests are cached and duplicate in-flight requests are reused to reduce repeat loading while scrolling.
+### Mod Browser
+- Search Minecraft projects on **Modrinth** and **CurseForge**.
+- Browse project details, galleries, versions, dependencies, and downloadable files.
+- Use a cleaner browser layout with separate, easy-to-find filter menus.
+- Filter by Minecraft version and mod loader.
+- Sort results by relevance, downloads, or recently updated.
+- Cache thumbnails and reuse in-flight image requests to reduce repeated loading while scrolling.
 
-## Optional stable features
+### Optional stable features
 
-Both features are **off by default** and can be toggled from the Mod Browser filter menu.
+These features are regular options—not experimental screens—and are **off by default**. Toggle them from the Mod Browser's filter menu.
 
-- **Advanced Mod Search** — enables project-type filters (mods, resource packs, shaders, data packs) and Modrinth client/server compatibility filters, including optional support.
-- **Turbo Downloads** — raises the per-host connection limit, gives the download task higher priority, and allows a longer resource timeout. It cannot bypass server or network limits and may not make a single-file transfer faster.
+- **Advanced Mod Search** — unlocks project-type filters for mods, resource packs, shaders, and data packs, plus Modrinth client/server compatibility filters.
+- **Turbo Downloads** — increases the per-host connection limit, prioritizes the download task, and allows more time for a transfer to finish. Actual speed still depends on the server and network.
 
-## Downloads
+### Downloads
+- Display download progress, transferred bytes, approximate speed, and estimated remaining time when available.
+- Save files in the app's `Documents/ST Mod Browser/` directory, organized by project type.
+- Avoid overwriting an existing file when downloading the same filename again.
+- Downloads are saved files; they are not automatically installed into an active Minecraft instance.
 
-- Progress shows transferred bytes, percentage when available, approximate speed, and estimated remaining time.
-- Files are saved under `Documents/ST Mod Browser/` in a folder matching the selected project type.
-- Downloads are not automatically installed into Minecraft's active instance. Move or import them into the correct instance folder before launching the game.
-- Existing files are not overwritten by a repeated download.
+## Building from an iPhone
 
-## Build from iPhone
+The project uses GitHub Actions to build the iOS artifacts, so you can build from an iPhone without connecting a Mac. The workflow includes Homebrew download caching, less redundant setup, and cancellation of older in-progress builds on the same branch.
 
-GitHub Actions builds the iOS artifacts, so the project can be tested from an iPhone without a Mac. The workflow caches Homebrew downloads, removes redundant setup, cancels older in-progress builds for the same branch, and keeps the existing IPA packaging variants.
+1. Open the [iOS workflow](https://github.com/iamlordst-jpg/STLauncher/actions/workflows/ios.yml).
+2. Choose the branch you want to build.
+3. Open the latest run and download the IPA artifact.
+4. Install/sign it using your usual iPhone workflow, such as LiveContainer or SideStore.
 
-A successful workflow confirms compilation and packaging only; install the resulting IPA in LiveContainer and test the browser and downloads on-device before considering the changes verified.
+## Project
 
-## Credits
-
-- [Amethyst-Offline](https://github.com/AngelAuraMC/Amethyst-Offline) — launcher codebase/fork.
-- [Amethyst-iOS](https://github.com/AngelAuraMC/Amethyst-iOS) — upstream iOS launcher.
-- [Modrinth](https://modrinth.com/) — project discovery and data.
-- Made by ST, with the help of ChatGPT.
+- **Original launcher:** [Amethyst-Offline](https://github.com/AngelAuraMC/Amethyst-Offline)
+- **Upstream iOS project:** [Amethyst-iOS](https://github.com/AngelAuraMC/Amethyst-iOS)
+- **Mod source:** [Modrinth](https://modrinth.com/)
+- **Creator:** ST — made with the help of ChatGPT.
 
 ## Disclaimer
 
