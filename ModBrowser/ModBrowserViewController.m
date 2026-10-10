@@ -390,8 +390,8 @@
     [NSLayoutConstraint activateConstraints:@[
         [self.modIcon.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:14],
         [self.modIcon.centerYAnchor constraintEqualToAnchor:self.contentView.centerYAnchor],
-        [self.modIcon.widthAnchor constraintEqualToConstant:48],
-        [self.modIcon.heightAnchor constraintEqualToConstant:48],
+        [self.modIcon.widthAnchor constraintEqualToConstant:64],
+        [self.modIcon.heightAnchor constraintEqualToConstant:64],
         [labels.leadingAnchor constraintEqualToAnchor:self.modIcon.trailingAnchor constant:12],
         [labels.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-8],
         [labels.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:10],
@@ -1110,7 +1110,7 @@
     self.refreshControl = [[UIRefreshControl alloc] init];
     [self.refreshControl addTarget:self action:@selector(refreshProjects) forControlEvents:UIControlEventValueChanged];
     self.tableView.rowHeight = UITableViewAutomaticDimension;
-    self.tableView.estimatedRowHeight = 94;
+    self.tableView.estimatedRowHeight = 104;
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchController.searchResultsUpdater = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
@@ -1122,9 +1122,9 @@
     NSString *initialTypeLabel = [self.projectType isEqualToString:@"resourcepack"] ? @"resource packs" : ([self.projectType isEqualToString:@"shader"] ? @"shaders" : ([self.projectType isEqualToString:@"datapack"] ? @"data packs" : @"mods"));
     self.searchController.searchBar.placeholder = [NSString stringWithFormat:@"Search %@ on Modrinth", initialTypeLabel];
     [self.sourceControl addTarget:self action:@selector(sourceChanged:) forControlEvents:UIControlEventValueChanged];
-    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"slider.horizontal.3"] style:UIBarButtonItemStylePlain target:self action:@selector(showFilters)];
-    self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Downloads" style:UIBarButtonItemStylePlain target:self action:@selector(openDownloadManager)];
-    self.navigationItem.leftBarButtonItems = @[[[UIBarButtonItem alloc] initWithTitle:@"Downloads" style:UIBarButtonItemStylePlain target:self action:@selector(openDownloadManager)], [[UIBarButtonItem alloc] initWithTitle:@"Library" style:UIBarButtonItemStylePlain target:self action:@selector(openLibrary)]];
+    UIBarButtonItem *filtersButton = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"slider.horizontal.3"] style:UIBarButtonItemStylePlain target:self action:@selector(showFilters)];
+    UIBarButtonItem *downloadsButton = [[UIBarButtonItem alloc] initWithTitle:@"Downloads" style:UIBarButtonItemStylePlain target:self action:@selector(openDownloadManager)];
+    self.navigationItem.rightBarButtonItems = @[filtersButton, downloadsButton];
     [[STDownloadCoordinator shared] records];
     self.definesPresentationContext = YES;
     self.activity = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
@@ -1500,6 +1500,9 @@
             }
         }
     }
+    cell.nameLabel.text = [project[@"title"] isKindOfClass:NSString.class] ? project[@"title"] : @"Untitled project";
+    NSString *shortDescription = [project[@"description"] isKindOfClass:NSString.class] ? project[@"description"] : ([project[@"summary"] isKindOfClass:NSString.class] ? project[@"summary"] : @"");
+    cell.descriptionLabel.text = shortDescription.length ? shortDescription : @"No description available.";
     cell.descriptionLabel.numberOfLines = 2;
     if (indexPath.row >= self.projects.count - 2 && self.offset < self.totalHits && !self.loading) [self searchForProjectsReset:NO];
     return cell;
