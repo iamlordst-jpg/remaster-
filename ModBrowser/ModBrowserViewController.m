@@ -915,7 +915,8 @@
 
 - (void)sourceChanged:(UISegmentedControl *)sender {
     self.curseForgeSource = sender.selectedSegmentIndex == 1;
-    self.searchController.searchBar.placeholder = self.curseForgeSource ? @"Search CurseForge mods" : @"Search Modrinth mods";
+    NSString *typeLabel = [self.projectType isEqualToString:@"resourcepack"] ? @"resource packs" : ([self.projectType isEqualToString:@"shader"] ? @"shaders" : ([self.projectType isEqualToString:@"datapack"] ? @"data packs" : @"mods"));
+    self.searchController.searchBar.placeholder = [NSString stringWithFormat:@"Search %@ on %@", typeLabel, self.curseForgeSource ? @"CurseForge" : @"Modrinth"];
     if (self.curseForgeSource && !self.curseForgeAPIKey.length) [self promptForCurseForgeKeyThenSearch];
     else [self searchForProjectsReset:YES];
 }
@@ -1082,8 +1083,11 @@
     return label;
 }
 - (void)showFilters {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Mod Browser Filters"
-        message:[NSString stringWithFormat:@"Loader: %@\nMinecraft version: %@", self.loader.capitalizedString, self.minecraftVersion ?: @"Any"]
+    NSString *contentLabel = [self.projectType isEqualToString:@"resourcepack"] ? @"Resource packs" : ([self.projectType isEqualToString:@"shader"] ? @"Shaders" : ([self.projectType isEqualToString:@"datapack"] ? @"Data packs" : @"Mods"));
+    NSString *filterTitle = [self isSTLauncherMode] ? @"STLauncher Filters" : @"Mod Browser Filters";
+    NSString *filterMessage = [self isSTLauncherMode] ? [NSString stringWithFormat:@"Content: %@\nLoader: %@\nMinecraft version: %@", contentLabel, self.loader.capitalizedString, self.minecraftVersion ?: @"Any"] : [NSString stringWithFormat:@"Loader: %@\nMinecraft version: %@", self.loader.capitalizedString, self.minecraftVersion ?: @"Any"];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:filterTitle
+        message:filterMessage
         preferredStyle:UIAlertControllerStyleActionSheet];
     if (![self isSTLauncherMode] || [self.projectType isEqualToString:@"mod"]) {
         for (NSString *loader in @[@"forge", @"fabric", @"quilt", @"neoforge"]) {
@@ -1101,12 +1105,14 @@
             [alert addAction:[UIAlertAction actionWithTitle:label style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
                 self.projectType = type;
                 [[NSUserDefaults standardUserDefaults] setObject:type forKey:@"STLauncherProjectType"];
-                if (![type isEqualToString:@"mod"]) self.showFavoritesOnly = NO;
+                if (![type isEqualToString:@"mod"]) { self.showFavoritesOnly = NO; self.selectedCollectionName = nil; }
+                NSString *typeLabel = [type isEqualToString:@"resourcepack"] ? @"resource packs" : ([type isEqualToString:@"shader"] ? @"shaders" : ([type isEqualToString:@"datapack"] ? @"data packs" : @"mods"));
+                self.searchController.searchBar.placeholder = [NSString stringWithFormat:@"Search %@ on %@", typeLabel, self.curseForgeSource ? @"CurseForge" : @"Modrinth"];
                 [self searchForProjectsReset:YES];
             }]];
         }
     }
-    if ([self isSTLauncherMode] && [[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalAdvancedSearch"] && !self.curseForgeSource) {
+    if ([self isSTLauncherMode] && [self.projectType isEqualToString:@"mod"] && [[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalAdvancedSearch"] && !self.curseForgeSource) {
         for (NSString *environment in @[@"any", @"client", @"server"]) {
             NSString *label = [environment isEqualToString:@"any"] ? @"Environment: Any" : ([environment isEqualToString:@"client"] ? @"Environment: Client-side" : @"Environment: Server-side");
             if ([self.environmentFilter isEqualToString:environment]) label = [label stringByAppendingString:@" ✓"];
