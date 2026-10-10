@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#import <CommonCrypto/CommonDigest.h>
 #import "ModBrowserViewController.h"
 #import "PLProfiles.h"
 #import "LauncherPreferences.h"
@@ -325,6 +326,8 @@
 @property(nonatomic) UILabel *statusLabel;
 @property(nonatomic) UIScrollView *galleryScroll;
 @property(nonatomic) NSMutableArray<NSString *> *galleryURLs;
+@property(nonatomic) UIBarButtonItem *favoriteButton;
+@property(nonatomic) UIBarButtonItem *collectionButton;
 - (instancetype)initWithProject:(NSDictionary *)project loader:(NSString *)loader minecraftVersion:(NSString *)minecraftVersion versionsAction:(void (^)(NSDictionary *project))versionsAction;
 @end
 
@@ -346,6 +349,14 @@
     self.view.backgroundColor = UIColor.systemGroupedBackgroundColor;
     self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(close)];
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    if ([defaults boolForKey:@"STLauncherExperimentalMode"] && [defaults boolForKey:@"STLauncherExperimentalFavoritesCollections"]) {
+        self.favoriteButton = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"star"] style:UIBarButtonItemStylePlain target:self action:@selector(toggleFavorite)];
+        self.navigationItem.leftBarButtonItem = self.favoriteButton;
+        self.collectionButton = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"folder.badge.plus"] style:UIBarButtonItemStylePlain target:self action:@selector(manageCollections)];
+        self.navigationItem.rightBarButtonItems = @[self.navigationItem.rightBarButtonItem, self.collectionButton];
+        [self updateFavoriteButton];
+    }
     UIScrollView *scroll = [[UIScrollView alloc] init];
     scroll.translatesAutoresizingMaskIntoConstraints = NO;
     scroll.alwaysBounceVertical = YES;
@@ -391,6 +402,82 @@
     [self loadProjectDetails];
 }
 - (void)close { [self dismissViewControllerAnimated:YES completion:nil]; }
+- (NSString *)currentProjectID {
+    id value = self.project[@"project_id"] ?: self.project[@"id"];
+    return [value isKindOfClass:NSString.class] ? value : [value description] ?: @"";
+}
+- (NSMutableArray<NSDictionary *> *)favoriteProjects {
+    NSArray *stored = [NSUserDefaults.standardUserDefaults arrayForKey:@"STLauncherFavoriteProjects"];
+    return stored ? [stored mutableCopy] : [NSMutableArray array];
+}
+- (void)updateFavoriteButton {
+    if (!self.favoriteButton) return;
+    NSString *projectID = [self currentProjectID];
+    BOOL isFavorite = NO;
+    for (NSDictionary *item in [self favoriteProjects]) {
+        NSString *savedID = [item[@"project_id"] description] ?: [item[@"id"] description] ?: @"";
+        if ([savedID isEqualToString:projectID]) { isFavorite = YES; break; }
+    }
+    self.favoriteButton.image = [UIImage systemImageNamed:isFavorite ? @"star.fill" : @"star"];
+    self.favoriteButton.tintColor = isFavorite ? UIColor.systemYellowColor : nil;
+}
+- (void)toggleFavorite {
+    NSString *projectID = [self currentProjectID];
+    if (!projectID.length) return;
+    NSMutableArray<NSDictionary *> *favorites = [self favoriteProjects];
+    NSInteger existing = NSNotFound;
+    for (NSUInteger i = 0; i < favorites.count; i++) {
+        NSString *savedID = [favorites[i][@"project_id"] description] ?: [favorites[i][@"id"] description] ?: @"";
+        if ([savedID isEqualToString:projectID]) { existing = (NSInteger)i; break; }
+    }
+    if (existing != NSNotFound) [favorites removeObjectAtIndex:(NSUInteger)existing];
+    else [favorites addObject:self.project];
+    [NSUserDefaults.standardUserDefaults setObject:favorites forKey:@"STLauncherFavoriteProjects"];
+    [self updateFavoriteButton];
+}
+- (void)manageCollections {
+    NSString *projectID = [self currentProjectID];
+    if (!projectID.length) return;
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    NSMutableDictionary *collections = [[defaults dictionaryForKey:@"STLauncherCollections"] mutableCopy] ?: [NSMutableDictionary dictionary];
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Save to collection" message:self.project[@"title"] ?: @"Choose a collection or create one." preferredStyle:UIAlertControllerStyleActionSheet];
+    for (NSString *name in [[collections allKeys] sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)]) {
+        [sheet addAction:[UIAlertAction actionWithTitle:name style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+            NSMutableArray *ids = [collections[name] mutableCopy] ?: [NSMutableArray array];
+            if (![ids containsObject:projectID]) [ids addObject:projectID];
+            collections[name] = ids;
+            [defaults setObject:collections forKey:@"STLauncherCollections"];
+            NSMutableArray *favorites = [self favoriteProjects];
+            BOOL found = NO;
+            for (NSDictionary *item in favorites) if ([[item[@"project_id"] description] isEqualToString:projectID] || [[item[@"id"] description] isEqualToString:projectID]) { found = YES; break; }
+            if (!found) { [favorites addObject:self.project]; [defaults setObject:favorites forKey:@"STLauncherFavoriteProjects"]; }
+            [self updateFavoriteButton];
+        }]];
+    }
+    [sheet addAction:[UIAlertAction actionWithTitle:@"New collection…" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        UIAlertController *input = [UIAlertController alertControllerWithTitle:@"New collection" message:@"Give this collection a name." preferredStyle:UIAlertControllerStyleAlert];
+        [input addTextFieldWithConfigurationHandler:^(UITextField *field) { field.placeholder = @"e.g. Performance mods"; field.autocapitalizationType = UITextAutocapitalizationTypeWords; }];
+        [input addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+        [input addAction:[UIAlertAction actionWithTitle:@"Create" style:UIAlertActionStyleDefault handler:^(UIAlertAction *createAction) {
+            NSString *name = [input.textFields.firstObject.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+            if (!name.length) return;
+            NSMutableDictionary *latest = [[defaults dictionaryForKey:@"STLauncherCollections"] mutableCopy] ?: [NSMutableDictionary dictionary];
+            NSMutableArray *ids = [latest[name] mutableCopy] ?: [NSMutableArray array];
+            if (![ids containsObject:projectID]) [ids addObject:projectID];
+            latest[name] = ids;
+            [defaults setObject:latest forKey:@"STLauncherCollections"];
+            NSMutableArray *favorites = [self favoriteProjects];
+            BOOL found = NO;
+            for (NSDictionary *item in favorites) if ([[item[@"project_id"] description] isEqualToString:projectID] || [[item[@"id"] description] isEqualToString:projectID]) { found = YES; break; }
+            if (!found) { [favorites addObject:self.project]; [defaults setObject:favorites forKey:@"STLauncherFavoriteProjects"]; }
+            [self updateFavoriteButton];
+        }]];
+        [self presentViewController:input animated:YES completion:nil];
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    if (sheet.popoverPresentationController) sheet.popoverPresentationController.barButtonItem = self.collectionButton;
+    [self presentViewController:sheet animated:YES completion:nil];
+}
 - (void)openVersions {
     if (self.versionsAction) self.versionsAction(self.project);
 }
@@ -690,6 +777,11 @@
 @property(nonatomic) BOOL curseForgeSource;
 @property(nonatomic) NSString *curseForgeAPIKey;
 @property(nonatomic) UITextField *customVersionField;
+@property(nonatomic) UILabel *browserHeaderTitle;
+@property(nonatomic) UILabel *browserHeaderSubtitle;
+@property(nonatomic) BOOL showFavoritesOnly;
+@property(nonatomic) NSString *selectedCollectionName;
+@property(nonatomic) NSString *environmentFilter;
 @end
 
 @implementation ModBrowserViewController
@@ -701,6 +793,7 @@
         self.loader = @"fabric";
         self.query = @"";
         self.sortOrder = @"relevance";
+        self.environmentFilter = [[NSUserDefaults standardUserDefaults] stringForKey:@"STLauncherSearchEnvironment"] ?: @"any";
         self.projects = [NSMutableArray array];
         self.iconCache = [[NSCache alloc] init];
         self.iconCache.countLimit = 250;
@@ -719,6 +812,21 @@
 }
 
 - (NSString *)imageName { return @"shippingbox"; }
+- (BOOL)isSTLauncherMode { return [[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalMode"]; }
+- (BOOL)isExperimentalUIEnabled { return [self isSTLauncherMode] && [[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalUI"]; }
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    self.overrideUserInterfaceStyle = [self isExperimentalUIEnabled] ? UIUserInterfaceStyleDark : UIUserInterfaceStyleUnspecified;
+    if ([self isExperimentalUIEnabled]) {
+        self.tableView.backgroundColor = [UIColor colorWithRed:0.045 green:0.035 blue:0.075 alpha:1.0];
+        self.tableView.separatorColor = [UIColor colorWithWhite:1.0 alpha:0.09];
+        self.navigationController.navigationBar.tintColor = [UIColor colorWithRed:0.75 green:0.55 blue:1.0 alpha:1.0];
+    } else {
+        self.tableView.backgroundColor = UIColor.systemGroupedBackgroundColor;
+    }
+    [self layoutSourceControl];
+    [self.tableView reloadData];
+}
 
 - (void)viewDidLoad {
     [super viewDidLoad];
@@ -746,17 +854,41 @@
 - (void)viewDidLayoutSubviews { [super viewDidLayoutSubviews]; [self layoutSourceControl]; }
 - (void)layoutSourceControl {
     CGFloat width = self.tableView.bounds.size.width;
+    BOOL stMode = [self isSTLauncherMode];
+    CGFloat height = stMode ? 116 : 52;
     UIView *header = self.tableView.tableHeaderView;
-    if (!header || ![header.subviews containsObject:self.sourceControl]) {
-        header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, width, 52)];
-        self.sourceControl.frame = CGRectMake(16, 8, MAX(0, width - 32), 36);
+    if (!header || ![header.subviews containsObject:self.sourceControl] || (stMode && !self.browserHeaderTitle) || (!stMode && self.browserHeaderTitle)) {
+        header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, width, height)];
+        if (stMode) {
+            self.browserHeaderTitle = [[UILabel alloc] initWithFrame:CGRectZero];
+            self.browserHeaderTitle.text = @"Discover mods";
+            self.browserHeaderTitle.font = [UIFont systemFontOfSize:23 weight:UIFontWeightBold];
+            self.browserHeaderTitle.textColor = [self isExperimentalUIEnabled] ? UIColor.whiteColor : UIColor.labelColor;
+            self.browserHeaderSubtitle = [[UILabel alloc] initWithFrame:CGRectZero];
+            self.browserHeaderSubtitle.text = @"Browse projects • filter by loader and Minecraft version";
+            self.browserHeaderSubtitle.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
+            self.browserHeaderSubtitle.textColor = [self isExperimentalUIEnabled] ? [UIColor colorWithWhite:0.72 alpha:1.0] : UIColor.secondaryLabelColor;
+            self.browserHeaderSubtitle.numberOfLines = 1;
+            [header addSubview:self.browserHeaderTitle];
+            [header addSubview:self.browserHeaderSubtitle];
+        } else {
+            self.browserHeaderTitle = nil;
+            self.browserHeaderSubtitle = nil;
+        }
         [header addSubview:self.sourceControl];
         self.tableView.tableHeaderView = header;
+    }
+    header.frame = CGRectMake(0, 0, width, height);
+    if (stMode) {
+        self.browserHeaderTitle.frame = CGRectMake(16, 7, MAX(0, width - 32), 29);
+        self.browserHeaderSubtitle.frame = CGRectMake(16, 36, MAX(0, width - 32), 19);
+        self.sourceControl.frame = CGRectMake(16, 62, MAX(0, width - 32), 36);
+        self.sourceControl.selectedSegmentTintColor = [self isExperimentalUIEnabled] ? [UIColor colorWithRed:0.43 green:0.22 blue:0.70 alpha:1.0] : nil;
     } else {
-        header.frame = CGRectMake(0, 0, width, 52);
         self.sourceControl.frame = CGRectMake(16, 8, MAX(0, width - 32), 36);
     }
 }
+
 - (void)sourceChanged:(UISegmentedControl *)sender {
     self.curseForgeSource = sender.selectedSegmentIndex == 1;
     self.searchController.searchBar.placeholder = self.curseForgeSource ? @"Search CurseForge mods" : @"Search Modrinth mods";
@@ -801,6 +933,32 @@
     NSUInteger generation = self.searchGeneration;
     self.loading = YES; [self.activity startAnimating]; self.tableView.tableFooterView = self.activity; [self.tableView reloadData];
 
+    if ([self isSTLauncherMode] && self.showFavoritesOnly) {
+        NSArray<NSDictionary *> *favorites = [[NSUserDefaults.standardUserDefaults arrayForKey:@"STLauncherFavoriteProjects"] isKindOfClass:NSArray.class]
+            ? [NSUserDefaults.standardUserDefaults arrayForKey:@"STLauncherFavoriteProjects"] : @[];
+        NSDictionary *allCollections = [NSUserDefaults.standardUserDefaults dictionaryForKey:@"STLauncherCollections"] ?: @{};
+        NSArray *collectionIDs = self.selectedCollectionName.length && [allCollections[self.selectedCollectionName] isKindOfClass:NSArray.class]
+            ? allCollections[self.selectedCollectionName] : nil;
+        NSString *needle = (self.query ?: @"").lowercaseString;
+        [self.projects removeAllObjects];
+        for (NSDictionary *favorite in favorites) {
+            NSString *projectID = [favorite[@"project_id"] description] ?: [favorite[@"id"] description] ?: @"";
+            NSString *title = [favorite[@"title"] isKindOfClass:NSString.class] ? favorite[@"title"] : @"";
+            NSString *description = [favorite[@"description"] isKindOfClass:NSString.class] ? favorite[@"description"] : @"";
+            if (collectionIDs && ![collectionIDs containsObject:projectID]) continue;
+            if (needle.length && ![[title lowercaseString] containsString:needle] && ![[description lowercaseString] containsString:needle]) continue;
+            [self.projects addObject:favorite];
+        }
+        self.totalHits = self.projects.count;
+        self.offset = self.projects.count;
+        self.loading = NO;
+        [self.activity stopAnimating];
+        self.tableView.tableFooterView = [[UIView alloc] initWithFrame:CGRectZero];
+        self.tableView.backgroundView = self.projects.count ? nil : [self messageView:self.selectedCollectionName.length ? @"This collection is empty. Add mods from a project's details page." : @"No saved favorites match this search yet."];
+        [self.tableView reloadData];
+        return;
+    }
+
     NSMutableURLRequest *request = nil;
     if (self.curseForgeSource) {
         if (!self.curseForgeAPIKey.length) { self.loading = NO; [self.activity stopAnimating]; [self promptForCurseForgeKeyThenSearch]; return; }
@@ -823,6 +981,10 @@
         NSMutableArray<NSArray<NSString *> *> *facetGroups = [NSMutableArray arrayWithObject:@[@"project_type:mod"]];
         [facetGroups addObject:@[[NSString stringWithFormat:@"categories:%@", self.loader]]];
         if (self.minecraftVersion.length) [facetGroups addObject:@[[NSString stringWithFormat:@"versions:%@", self.minecraftVersion]]];
+        if ([self isSTLauncherMode] && [[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalAdvancedSearch"]) {
+            if ([self.environmentFilter isEqualToString:@"client"]) [facetGroups addObject:@[@"client_side:required"]];
+            else if ([self.environmentFilter isEqualToString:@"server"]) [facetGroups addObject:@[@"server_side:required"]];
+        }
         NSData *facetData = [NSJSONSerialization dataWithJSONObject:facetGroups options:0 error:nil];
         NSString *facets = [[NSString alloc] initWithData:facetData encoding:NSUTF8StringEncoding] ?: @"[[\"project_type:mod\"],[\"categories:fabric\"]]";
         NSArray *items = @[
@@ -871,7 +1033,8 @@
                 if (!self.projects.count) self.tableView.backgroundView = [self messageView:self.curseForgeSource ? @"Couldn’t load CurseForge. Check the API key and connection, then pull to retry." : @"Couldn’t load Modrinth. Check your connection and pull to retry."];
             } else {
                 [self.projects addObjectsFromArray:hits ?: @[]];
-                if ([[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalPrefetchThumbnails"]) {
+                if ([[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalPrefetchThumbnails"] ||
+                    ([[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalInstantThumbnails"] && [self isSTLauncherMode])) {
                     NSUInteger prefetchCount = MIN(self.projects.count, self.offset + 8);
                     for (NSUInteger i = self.offset; i < prefetchCount; i++) [self prefetchThumbnailForProject:self.projects[i]];
                 }
@@ -903,6 +1066,32 @@
                 self.loader = loader;
                 [self searchForProjectsReset:YES];
             }]];
+    }
+    if ([self isSTLauncherMode] && [[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalAdvancedSearch"] && !self.curseForgeSource) {
+        for (NSString *environment in @[@"any", @"client", @"server"]) {
+            NSString *label = [environment isEqualToString:@"any"] ? @"Environment: Any" : ([environment isEqualToString:@"client"] ? @"Environment: Client-side" : @"Environment: Server-side");
+            if ([self.environmentFilter isEqualToString:environment]) label = [label stringByAppendingString:@" ✓"];
+            [alert addAction:[UIAlertAction actionWithTitle:label style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+                self.environmentFilter = environment;
+                [[NSUserDefaults standardUserDefaults] setObject:environment forKey:@"STLauncherSearchEnvironment"];
+                [self searchForProjectsReset:YES];
+            }]];
+        }
+    }
+    if ([self isSTLauncherMode] && [[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalFavoritesCollections"]) {
+        [alert addAction:[UIAlertAction actionWithTitle:self.showFavoritesOnly ? @"Browse all mods" : @"Show saved favorites" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+            self.showFavoritesOnly = !self.showFavoritesOnly;
+            if (!self.showFavoritesOnly) self.selectedCollectionName = nil;
+            [self searchForProjectsReset:YES];
+        }]];
+        NSDictionary *collections = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"STLauncherCollections"] ?: @{};
+        for (NSString *name in [[collections allKeys] sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)]) {
+            [alert addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"Collection: %@", name] style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+                self.showFavoritesOnly = YES;
+                self.selectedCollectionName = name;
+                [self searchForProjectsReset:YES];
+            }]];
+        }
     }
     for (NSString *sort in @[@"relevance", @"downloads", @"updated"]) {
         NSString *label = [sort isEqualToString:@"relevance"] ? @"Sort: Relevance" : ([sort isEqualToString:@"downloads"] ? @"Sort: Most downloads" : @"Sort: Recently updated");
@@ -945,6 +1134,12 @@
         self.minecraftVersion = nil;
         [self searchForProjectsReset:YES];
     }]];
+    if ([self isSTLauncherMode] && [[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalDownloadDiagnostics"]) {
+        [alert addAction:[UIAlertAction actionWithTitle:@"Last download diagnostics" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+            NSString *report = [[NSUserDefaults standardUserDefaults] stringForKey:@"STLauncherLastDownloadDiagnostics"] ?: @"No download has been recorded yet.";
+            [self showMessage:report title:@"Download diagnostics"];
+        }]];
+    }
     [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     if (alert.popoverPresentationController) alert.popoverPresentationController.barButtonItem = self.navigationItem.rightBarButtonItem;
     [self presentViewController:alert animated:YES completion:nil];
@@ -992,6 +1187,21 @@
     NSDictionary *project = self.projects[indexPath.row];
     NSString *projectID = project[@"project_id"] ?: @"";
     cell.projectID = projectID;
+    if ([self isExperimentalUIEnabled]) {
+        cell.backgroundColor = [UIColor colorWithRed:0.075 green:0.06 blue:0.12 alpha:1.0];
+        cell.contentView.backgroundColor = [UIColor colorWithRed:0.075 green:0.06 blue:0.12 alpha:1.0];
+        cell.nameLabel.textColor = UIColor.whiteColor;
+        cell.descriptionLabel.textColor = [UIColor colorWithWhite:0.76 alpha:1.0];
+        cell.downloadsLabel.textColor = [UIColor colorWithWhite:0.58 alpha:1.0];
+        cell.modIcon.backgroundColor = [UIColor colorWithRed:0.13 green:0.10 blue:0.20 alpha:1.0];
+    } else {
+        cell.backgroundColor = UIColor.secondarySystemGroupedBackgroundColor;
+        cell.contentView.backgroundColor = UIColor.secondarySystemGroupedBackgroundColor;
+        cell.nameLabel.textColor = UIColor.labelColor;
+        cell.descriptionLabel.textColor = UIColor.secondaryLabelColor;
+        cell.downloadsLabel.textColor = UIColor.tertiaryLabelColor;
+        cell.modIcon.backgroundColor = UIColor.secondarySystemGroupedBackgroundColor;
+    }
     cell.nameLabel.text = project[@"title"] ?: @"Untitled mod";
     cell.descriptionLabel.text = project[@"description"] ?: @"";
     NSNumber *downloads = project[@"downloads"];
@@ -1044,7 +1254,7 @@
             [task resume];
         }
     }
-    if ([[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalCompactResults"]) {
+    if ([self isSTLauncherMode] && [[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalCompactResults"]) {
         cell.descriptionLabel.numberOfLines = 1;
     } else {
         cell.descriptionLabel.numberOfLines = 2;
@@ -1162,10 +1372,14 @@
     }
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Downloading mod…" message:[NSString stringWithFormat:@"%@\n\nSaving to ST Mod Browser/mods.", filename] preferredStyle:UIAlertControllerStyleAlert];
     [self presentViewController:alert animated:YES completion:nil];
+    NSDate *downloadStartedAt = [NSDate date];
+    BOOL turboDownloads = [self isSTLauncherMode] && [[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalTurboDownloads"];
+    BOOL smartInstaller = [self isSTLauncherMode] && [[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalSmartInstaller"];
+    BOOL diagnosticsEnabled = [self isSTLauncherMode] && [[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalDownloadDiagnostics"];
     NSURLSessionConfiguration *configuration = NSURLSessionConfiguration.defaultSessionConfiguration;
     configuration.requestCachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
-    configuration.timeoutIntervalForResource = 180;
-    configuration.HTTPMaximumConnectionsPerHost = 8;
+    configuration.timeoutIntervalForResource = turboDownloads ? 240 : 180;
+    configuration.HTTPMaximumConnectionsPerHost = turboDownloads ? 12 : 6;
     configuration.URLCache = nil;
     NSURLSession *session = [NSURLSession sessionWithConfiguration:configuration];
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
@@ -1177,19 +1391,51 @@
             NSString *temporaryDestination = [destination stringByAppendingString:@".download"];
             [NSFileManager.defaultManager removeItemAtPath:temporaryDestination error:nil];
             [NSFileManager.defaultManager moveItemAtURL:location toURL:[NSURL fileURLWithPath:temporaryDestination] error:&moveError];
+            NSString *expectedSHA1 = [file[@"hashes"][@"sha1"] isKindOfClass:NSString.class] ? file[@"hashes"][@"sha1"] : @"";
+            if (!moveError && smartInstaller && expectedSHA1.length) {
+                NSData *downloadedData = [NSData dataWithContentsOfFile:temporaryDestination options:NSDataReadingMappedIfSafe error:nil];
+                unsigned char digest[CC_SHA1_DIGEST_LENGTH];
+                if (downloadedData) {
+                    CC_SHA1(downloadedData.bytes, (CC_LONG)downloadedData.length, digest);
+                    NSMutableString *actualSHA1 = [NSMutableString stringWithCapacity:CC_SHA1_DIGEST_LENGTH * 2];
+                    for (NSUInteger i = 0; i < CC_SHA1_DIGEST_LENGTH; i++) [actualSHA1 appendFormat:@"%02x", digest[i]];
+                    if (![actualSHA1.lowercaseString isEqualToString:expectedSHA1.lowercaseString]) {
+                        moveError = [NSError errorWithDomain:@"STLauncherDownload" code:3 userInfo:@{NSLocalizedDescriptionKey:@"The downloaded file failed its SHA-1 integrity check. The file was discarded."}];
+                        [NSFileManager.defaultManager removeItemAtPath:temporaryDestination error:nil];
+                    }
+                } else {
+                    moveError = [NSError errorWithDomain:@"STLauncherDownload" code:4 userInfo:@{NSLocalizedDescriptionKey:@"Could not verify the downloaded file's integrity. The file was discarded."}];
+                    [NSFileManager.defaultManager removeItemAtPath:temporaryDestination error:nil];
+                }
+            }
             if (!moveError) {
                 if (![NSFileManager.defaultManager moveItemAtPath:temporaryDestination toPath:destination error:&moveError]) {
                     [NSFileManager.defaultManager removeItemAtPath:temporaryDestination error:nil];
                 }
             }
         }
+        NSTimeInterval elapsed = [[NSDate date] timeIntervalSinceDate:downloadStartedAt];
+        NSHTTPURLResponse *httpResponse = [response isKindOfClass:NSHTTPURLResponse.class] ? (NSHTTPURLResponse *)response : nil;
+        NSDictionary *attributes = [NSFileManager.defaultManager attributesOfItemAtPath:destination error:nil];
+        unsigned long long bytes = [attributes[NSFileSize] unsignedLongLongValue];
+        NSString *diagnostic = [NSString stringWithFormat:@"HTTP status: %ld\nFile size: %llu bytes\nElapsed: %.2f seconds\nAverage: %.2f KB/s",
+            (long)httpResponse.statusCode, bytes, elapsed, elapsed > 0 ? ((double)bytes / 1024.0 / elapsed) : 0.0];
+        [[NSUserDefaults standardUserDefaults] setObject:diagnostic forKey:@"STLauncherLastDownloadDiagnostics"];
         dispatch_async(dispatch_get_main_queue(), ^{
             [alert dismissViewControllerAnimated:YES completion:^{
-                if (error || moveError) [self showMessage:(error ?: moveError).localizedDescription title:@"Install failed"];
-                else [self showMessage:[NSString stringWithFormat:@"%@ was downloaded to:\n%@", filename, directory] title:@"Download complete"];
+                if (error || moveError) {
+                    NSString *message = (error ?: moveError).localizedDescription ?: @"Download failed.";
+                    if (diagnosticsEnabled) message = [message stringByAppendingFormat:@"\n\n%@", diagnostic];
+                    [self showMessage:message title:@"Download failed"];
+                } else {
+                    NSString *message = [NSString stringWithFormat:@"%@ was downloaded to:\n%@", filename, directory];
+                    if (diagnosticsEnabled) message = [message stringByAppendingFormat:@"\n\n%@", diagnostic];
+                    [self showMessage:message title:@"Download complete"];
+                }
             }];
         });
     }];
+    if (turboDownloads) task.priority = NSURLSessionTaskPriorityHigh;
     [task resume];
 }
 - (void)showMessage:(NSString *)message title:(NSString *)title {
@@ -1385,37 +1631,49 @@ static NSString * const STLauncherModeKey = @"STLauncherExperimentalMode";
     [super viewDidLoad];
     self.title = @"Experimental Features";
     self.tableView.backgroundColor = UIColor.systemGroupedBackgroundColor;
-    self.tableView.rowHeight = 62;
+    self.tableView.rowHeight = UITableViewAutomaticDimension;
+    self.tableView.estimatedRowHeight = 78;
     self.tableView.tableFooterView = [[UIView alloc] initWithFrame:CGRectZero];
 }
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return 2; }
-- (NSString *)titleForFeatureAtRow:(NSInteger)row {
-    return row == 0 ? @"Prefetch Thumbnails" : @"Compact Browser Cards";
+- (NSArray<NSDictionary *> *)features {
+    return @[
+        @{@"title":@"Turbo Downloads", @"detail":@"Prioritizes downloads and raises the connection limit for concurrent transfers. It cannot bypass the host or network's speed limit.", @"key":@"STLauncherExperimentalTurboDownloads"},
+        @{@"title":@"Instant Thumbnails", @"detail":@"Prefetches the next batch of mod icons so they are ready before you scroll. Uses extra data.", @"key":@"STLauncherExperimentalInstantThumbnails"},
+        @{@"title":@"Smart Mod Installer", @"detail":@"Checks the downloaded JAR against the source's SHA-1 hash when one is provided. Invalid files are discarded.", @"key":@"STLauncherExperimentalSmartInstaller"},
+        @{@"title":@"Advanced Mod Search", @"detail":@"Adds client-side and server-side environment filters to Modrinth search.", @"key":@"STLauncherExperimentalAdvancedSearch"},
+        @{@"title":@"Favorites & Collections", @"detail":@"Save projects with the star button and group saved projects into named collections.", @"key":@"STLauncherExperimentalFavoritesCollections"},
+        @{@"title":@"Experimental UI", @"detail":@"Applies the dark purple STLauncher styling to the mod browser. Amethyst's default appearance is unchanged.", @"key":@"STLauncherExperimentalUI"},
+        @{@"title":@"Download Diagnostics", @"detail":@"Shows HTTP status, file size, elapsed time and average transfer rate for the latest download.", @"key":@"STLauncherExperimentalDownloadDiagnostics"},
+        @{@"title":@"Compact Browser Cards", @"detail":@"Uses shorter mod descriptions to fit more results on screen.", @"key":@"STLauncherExperimentalCompactResults"}
+    ];
 }
-- (NSString *)descriptionForFeatureAtRow:(NSInteger)row {
-    return row == 0
-        ? @"Load upcoming mod icons before you scroll to them. Uses extra data and is off by default."
-        : @"Use shorter mod descriptions to fit more results on screen.";
-}
-- (NSString *)keyForFeatureAtRow:(NSInteger)row {
-    return row == 0 ? @"STLauncherExperimentalPrefetchThumbnails" : @"STLauncherExperimentalCompactResults";
-}
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return self.features.count; }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 1; }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"st-experimental-feature"];
     if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"st-experimental-feature"];
-    cell.textLabel.text = [self titleForFeatureAtRow:indexPath.row];
-    cell.detailTextLabel.text = [self descriptionForFeatureAtRow:indexPath.row];
+    NSDictionary *feature = [self features][indexPath.row];
+    cell.textLabel.text = feature[@"title"];
+    cell.textLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
+    cell.detailTextLabel.text = feature[@"detail"];
     cell.detailTextLabel.numberOfLines = 0;
+    cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
     cell.selectionStyle = UITableViewCellSelectionStyleNone;
     UISwitch *toggle = [[UISwitch alloc] init];
-    toggle.on = [[NSUserDefaults standardUserDefaults] boolForKey:[self keyForFeatureAtRow:indexPath.row]];
+    toggle.on = [[NSUserDefaults standardUserDefaults] boolForKey:feature[@"key"]];
     toggle.tag = indexPath.row;
     [toggle addTarget:self action:@selector(toggleFeature:) forControlEvents:UIControlEventValueChanged];
     cell.accessoryView = toggle;
     return cell;
 }
 - (void)toggleFeature:(UISwitch *)sender {
-    [[NSUserDefaults standardUserDefaults] setBool:sender.on forKey:[self keyForFeatureAtRow:sender.tag]];
+    NSDictionary *feature = [self features][sender.tag];
+    [[NSUserDefaults standardUserDefaults] setBool:sender.on forKey:feature[@"key"]];
+    if ([feature[@"key"] isEqualToString:@"STLauncherExperimentalInstantThumbnails"]) {
+        [[NSUserDefaults standardUserDefaults] setBool:sender.on forKey:@"STLauncherExperimentalPrefetchThumbnails"];
+    }
+    if ([feature[@"key"] isEqualToString:@"STLauncherExperimentalUI"]) {
+        self.navigationController.topViewController.overrideUserInterfaceStyle = UIUserInterfaceStyleUnspecified;
+    }
 }
 @end
