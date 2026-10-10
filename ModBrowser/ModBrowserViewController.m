@@ -1404,7 +1404,9 @@
     if (cached) {
         cell.modIcon.image = cached;
     } else if (iconURL.length) {
-        NSString *cacheKey = [[iconURL dataUsingEncoding:NSUTF8StringEncoding] base64EncodedStringWithOptions:0];
+        NSString *cacheKey = [[[iconURL dataUsingEncoding:NSUTF8StringEncoding] base64EncodedStringWithOptions:0] stringByReplacingOccurrencesOfString:@"/" withString:@"_"];
+        cacheKey = [cacheKey stringByReplacingOccurrencesOfString:@"+" withString:@"-"];
+        cacheKey = [cacheKey stringByReplacingOccurrencesOfString:@"=" withString:@""];
         NSString *diskPath = [self.iconDiskCacheDirectory stringByAppendingPathComponent:[cacheKey stringByAppendingString:@".jpg"]];
         UIImage *diskImage = [UIImage imageWithContentsOfFile:diskPath];
         if (diskImage) {
