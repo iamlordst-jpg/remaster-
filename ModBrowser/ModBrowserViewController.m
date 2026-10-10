@@ -177,6 +177,8 @@
 - (void)reloadDownloads { [self.tableView reloadData]; }
 - (NSArray<NSDictionary *> *)items {
     NSMutableArray<NSDictionary *> *items = [[[STDownloadCoordinator shared] records] mutableCopy];
+    NSDictionary *mainMenuDownload = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"STMainMenuDownloadStatus"];
+    if (mainMenuDownload) [items addObject:mainMenuDownload];
     NSMutableSet<NSString *> *knownPaths = [NSMutableSet set];
     for (NSDictionary *item in items) if ([item[@"destination"] isKindOfClass:NSString.class]) [knownPaths addObject:item[@"destination"]];
     NSString *base = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/ST Mod Browser"];
@@ -228,7 +230,15 @@
             [self presentViewController:confirm animated:YES completion:nil];
         }]];
     } else {
-        [menu addAction:[UIAlertAction actionWithTitle:@"Remove from history" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) { [[STDownloadCoordinator shared] deleteRecord:item]; }]];
+        [menu addAction:[UIAlertAction actionWithTitle:@"Remove from history" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+            if ([item[@"id"] isEqual:@"main-menu-download"]) {
+                [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"STMainMenuDownloadStatus"];
+                [[NSNotificationCenter defaultCenter] postNotificationName:@"STModDownloadsChanged" object:nil];
+                [self reloadDownloads];
+            } else {
+                [[STDownloadCoordinator shared] deleteRecord:item];
+            }
+        }]];
     }
     [menu addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     if (menu.popoverPresentationController) { menu.popoverPresentationController.sourceView = tableView; menu.popoverPresentationController.sourceRect = [tableView rectForRowAtIndexPath:indexPath]; }
