@@ -207,7 +207,7 @@
             [NSURLQueryItem queryItemWithName:@"pageSize" value:@"50"],
             [NSURLQueryItem queryItemWithName:@"index" value:[NSString stringWithFormat:@"%ld", (long)self.offset]], nil];
         NSDictionary *loaderIDs = @{@"forge":@"1", @"fabric":@"4", @"quilt":@"5", @"neoforge":@"6"};
-        if ([self.projectType isEqualToString:@"mod"]) [items addObject:[NSURLQueryItem queryItemWithName:@"modLoaderType" value:loaderIDs[self.loader] ?: @"1"]];
+        if (![self.project[@"project_type"] isKindOfClass:NSString.class] || [self.project[@"project_type"] isEqualToString:@"mod"]) [items addObject:[NSURLQueryItem queryItemWithName:@"modLoaderType" value:loaderIDs[self.loader] ?: @"1"]];
         if (self.minecraftVersion.length) [items addObject:[NSURLQueryItem queryItemWithName:@"gameVersion" value:self.minecraftVersion]];
         NSURLComponents *components = [NSURLComponents componentsWithString:[NSString stringWithFormat:@"https://api.curseforge.com/v1/mods/%@/files", self.project[@"project_id"] ?: @""]];
         components.queryItems = items;
@@ -215,9 +215,9 @@
         [request setValue:[NSUserDefaults.standardUserDefaults stringForKey:@"AmethystCurseForgeAPIKey"] ?: @"" forHTTPHeaderField:@"x-api-key"];
     } else {
         NSMutableArray<NSURLQueryItem *> *items = [NSMutableArray arrayWithObjects:
-            [NSURLQueryItem queryItemWithName:@"loaders" value:[NSString stringWithFormat:@"[\"%@\"]", self.loader]],
             [NSURLQueryItem queryItemWithName:@"limit" value:@"100"],
             [NSURLQueryItem queryItemWithName:@"offset" value:[NSString stringWithFormat:@"%ld", (long)self.offset]], nil];
+        if ([self.project[@"project_type"] isEqualToString:@"mod"]) [items addObject:[NSURLQueryItem queryItemWithName:@"loaders" value:[NSString stringWithFormat:@"[\"%@\"]", self.loader]]];
         if (self.minecraftVersion.length) [items addObject:[NSURLQueryItem queryItemWithName:@"game_versions" value:[NSString stringWithFormat:@"[\"%@\"]", self.minecraftVersion]]];
         NSURLComponents *components = [NSURLComponents componentsWithString:[NSString stringWithFormat:@"https://api.modrinth.com/v2/project/%@/version", self.project[@"project_id"] ?: @""]];
         components.queryItems = items;
@@ -987,7 +987,7 @@
             [NSURLQueryItem queryItemWithName:@"sortField" value:([self.sortOrder isEqualToString:@"downloads"] ? @"6" : ([self.sortOrder isEqualToString:@"updated"] ? @"3" : @"2"))],
             [NSURLQueryItem queryItemWithName:@"sortOrder" value:@"desc"], nil];
         NSDictionary *loaderIDs = @{@"forge":@"1", @"fabric":@"4", @"quilt":@"5", @"neoforge":@"6"};
-        [items addObject:[NSURLQueryItem queryItemWithName:@"modLoaderType" value:loaderIDs[self.loader] ?: @"1"]];
+        if ([self.projectType isEqualToString:@"mod"]) [items addObject:[NSURLQueryItem queryItemWithName:@"modLoaderType" value:loaderIDs[self.loader] ?: @"1"]];
         if (self.minecraftVersion.length) [items addObject:[NSURLQueryItem queryItemWithName:@"gameVersion" value:self.minecraftVersion]];
         NSURLComponents *components = [NSURLComponents componentsWithString:@"https://api.curseforge.com/v1/mods/search"];
         components.queryItems = items;
@@ -1036,7 +1036,8 @@
                             @"description":item[@"summary"] ?: @"",
                             @"downloads":item[@"downloadCount"] ?: @0,
                             @"icon_url":logo[@"url"] ?: @"",
-                            @"source":@"curseforge"
+                            @"source":@"curseforge",
+                            @"project_type":self.projectType ?: @"mod"
                         }];
                     }
                     hits = normalized;
