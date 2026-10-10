@@ -8,6 +8,7 @@
 @property(nonatomic) UILabel *nameLabel;
 @property(nonatomic) UILabel *descriptionLabel;
 @property(nonatomic) UILabel *downloadsLabel;
+@property(nonatomic) NSString *projectID;
 @end
 
 @implementation ModProjectCell
@@ -57,6 +58,7 @@
 - (void)prepareForReuse {
     [super prepareForReuse];
     self.modIcon.image = [UIImage systemImageNamed:@"shippingbox"];
+    self.projectID = nil;
     self.nameLabel.text = nil;
     self.descriptionLabel.text = nil;
     self.downloadsLabel.text = nil;
@@ -682,6 +684,7 @@
 @property(nonatomic) NSURLSessionDataTask *searchTask;
 @property(nonatomic) UIActivityIndicatorView *activity;
 @property(nonatomic) NSCache<NSString *, UIImage *> *iconCache;
+@property(nonatomic) NSMutableDictionary<NSString *, NSURLSessionDataTask *> *iconTasks;
 @property(nonatomic) UISegmentedControl *sourceControl;
 @property(nonatomic) BOOL curseForgeSource;
 @property(nonatomic) NSString *curseForgeAPIKey;
@@ -698,6 +701,8 @@
         self.query = @"";
         self.projects = [NSMutableArray array];
         self.iconCache = [[NSCache alloc] init];
+        self.iconCache.countLimit = 250;
+        self.iconTasks = [NSMutableDictionary dictionary];
         NSString *profileVersion = PLProfiles.current.selectedProfile[@"lastVersionId"] ?: @"";
         NSRegularExpression *pattern = [NSRegularExpression regularExpressionWithPattern:@"\\d+\\.\\d+(?:\\.\\d+)?" options:0 error:nil];
         NSTextCheckingResult *match = [pattern firstMatchInString:profileVersion options:0 range:NSMakeRange(0, profileVersion.length)];
@@ -936,43 +941,57 @@
     if (!cell) cell = [[ModProjectCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"modrinth-project"];
     NSDictionary *project = self.projects[indexPath.row];
     NSString *projectID = project[@"project_id"] ?: @"";
+    cell.projectID = projectID;
     cell.nameLabel.text = project[@"title"] ?: @"Untitled mod";
     cell.descriptionLabel.text = project[@"description"] ?: @"";
     NSNumber *downloads = project[@"downloads"];
     cell.downloadsLabel.text = downloads ? [NSString stringWithFormat:@"%@ downloads", [NSNumberFormatter localizedStringFromNumber:downloads numberStyle:NSNumberFormatterDecimalStyle]] : @"";
     cell.modIcon.image = [UIImage systemImageNamed:@"shippingbox"];
-    UIImage *cached = [self.iconCache objectForKey:projectID];
-    if (cached) cell.modIcon.image = cached;
-    else {
-        NSString *iconURL = project[@"icon_url"];
-        if (iconURL.length) {
-            NSURL *url = [NSURL URLWithString:iconURL];
-            if (url) {
-                NSURLSessionDataTask *task = [NSURLSession.sharedSession dataTaskWithURL:url completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-                    UIImage *image = data ? [UIImage imageWithData:data] : nil;
-                    if (!image) return;
+
+    NSString *iconURL = [project[@"icon_url"] isKindOfClass:NSString.class] ? project[@"icon_url"] : @"";
+    UIImage *cached = iconURL.length ? [self.iconCache objectForKey:iconURL] : nil;
+    if (cached) {
+        cell.modIcon.image = cached;
+    } else if (iconURL.length) {
+        NSURL *url = [NSURL URLWithString:iconURL];
+        if (url && !self.iconTasks[iconURL]) {
+            // Coalesce requests so fast scrolling does not download the same icon repeatedly.
+            __weak typeof(self) weakSelf = self;
+            NSURLSessionDataTask *task = [NSURLSession.sharedSession dataTaskWithURL:url completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+                UIImage *image = data && !error ? [UIImage imageWithData:data] : nil;
+                UIImage *thumbnail = nil;
+                if (image) {
                     CGSize target = CGSizeMake(96, 96);
                     UIGraphicsImageRendererFormat *format = [[UIGraphicsImageRendererFormat alloc] init];
-                    format.scale = 1.0; // Keep thumbnails at 96x96 pixels instead of scaling them up for Retina.
+                    format.scale = 1.0;
                     UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:target format:format];
-                    UIImage *thumbnail = [renderer imageWithActions:^(UIGraphicsImageRendererContext *context) {
+                    thumbnail = [renderer imageWithActions:^(UIGraphicsImageRendererContext *context) {
                         CGFloat scale = MIN(target.width / MAX(image.size.width, 1), target.height / MAX(image.size.height, 1));
                         CGSize fitted = CGSizeMake(image.size.width * scale, image.size.height * scale);
                         CGRect rect = CGRectMake((target.width - fitted.width) / 2.0, (target.height - fitted.height) / 2.0, fitted.width, fitted.height);
                         [image drawInRect:rect];
                     }];
-                    [self.iconCache setObject:thumbnail forKey:projectID];
-                    dispatch_async(dispatch_get_main_queue(), ^{
-                        for (ModProjectCell *visible in tableView.visibleCells) {
-                            NSIndexPath *visiblePath = [tableView indexPathForCell:visible];
-                            if (visiblePath && visiblePath.row < self.projects.count && [self.projects[visiblePath.row][@"project_id"] isEqualToString:projectID]) {
+                }
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    __strong typeof(weakSelf) self = weakSelf;
+                    if (!self) return;
+                    [self.iconTasks removeObjectForKey:iconURL];
+                    if (!thumbnail) return;
+                    [self.iconCache setObject:thumbnail forKey:iconURL];
+                    for (ModProjectCell *visible in tableView.visibleCells) {
+                        NSIndexPath *visiblePath = [tableView indexPathForCell:visible];
+                        if (visiblePath && visiblePath.row < self.projects.count) {
+                            NSDictionary *visibleProject = self.projects[visiblePath.row];
+                            if ([visible.projectID isEqualToString:visibleProject[@"project_id"]] &&
+                                [visibleProject[@"icon_url"] isEqualToString:iconURL]) {
                                 visible.modIcon.image = thumbnail;
                             }
                         }
-                    });
-                }];
-                [task resume];
-            }
+                    }
+                });
+            }];
+            self.iconTasks[iconURL] = task;
+            [task resume];
         }
     }
     if (indexPath.row >= self.projects.count - 2 && self.offset < self.totalHits && !self.loading) [self searchForProjectsReset:NO];
@@ -1086,7 +1105,7 @@
         [self showMessage:[NSString stringWithFormat:@"%@ is already installed.", filename] title:@"Already installed"];
         return;
     }
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Downloading mod…" message:[NSString stringWithFormat:@"%@\n\nThe file will be placed in the Minecraft mods folder.", filename] preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Downloading mod…" message:[NSString stringWithFormat:@"%@\n\nSaving to ST Mod Browser/mods.", filename] preferredStyle:UIAlertControllerStyleAlert];
     [self presentViewController:alert animated:YES completion:nil];
     NSURLSessionConfiguration *configuration = NSURLSessionConfiguration.defaultSessionConfiguration;
     configuration.requestCachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
