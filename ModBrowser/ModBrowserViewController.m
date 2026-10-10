@@ -313,6 +313,285 @@
 }
 @end
 
+
+@interface ModProjectDetailsController : UIViewController
+@property(nonatomic) NSDictionary *project;
+@property(nonatomic) NSString *loader;
+@property(nonatomic) NSString *minecraftVersion;
+@property(nonatomic, copy) void (^versionsAction)(NSDictionary *project);
+@property(nonatomic) UIStackView *contentStack;
+@property(nonatomic) UILabel *statusLabel;
+@property(nonatomic) UIScrollView *galleryScroll;
+@property(nonatomic) NSMutableArray<NSString *> *galleryURLs;
+- (instancetype)initWithProject:(NSDictionary *)project loader:(NSString *)loader minecraftVersion:(NSString *)minecraftVersion versionsAction:(void (^)(NSDictionary *project))versionsAction;
+@end
+
+@implementation ModProjectDetailsController
+- (instancetype)initWithProject:(NSDictionary *)project loader:(NSString *)loader minecraftVersion:(NSString *)minecraftVersion versionsAction:(void (^)(NSDictionary *))versionsAction {
+    self = [super init];
+    if (self) {
+        _project = project;
+        _loader = loader ?: @"fabric";
+        _minecraftVersion = minecraftVersion;
+        _versionsAction = [versionsAction copy];
+        _galleryURLs = [NSMutableArray array];
+        self.title = @"Mod Details";
+    }
+    return self;
+}
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.view.backgroundColor = UIColor.systemGroupedBackgroundColor;
+    self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(close)];
+    UIScrollView *scroll = [[UIScrollView alloc] init];
+    scroll.translatesAutoresizingMaskIntoConstraints = NO;
+    scroll.alwaysBounceVertical = YES;
+    [self.view addSubview:scroll];
+    [NSLayoutConstraint activateConstraints:@[
+        [scroll.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [scroll.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        [scroll.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
+        [scroll.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]
+    ]];
+    self.contentStack = [[UIStackView alloc] init];
+    self.contentStack.translatesAutoresizingMaskIntoConstraints = NO;
+    self.contentStack.axis = UILayoutConstraintAxisVertical;
+    self.contentStack.spacing = 16;
+    self.contentStack.layoutMargins = UIEdgeInsetsMake(18, 16, 28, 16);
+    self.contentStack.layoutMarginsRelativeArrangement = YES;
+    [scroll addSubview:self.contentStack];
+    [NSLayoutConstraint activateConstraints:@[
+        [self.contentStack.leadingAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.leadingAnchor],
+        [self.contentStack.trailingAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.trailingAnchor],
+        [self.contentStack.topAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.topAnchor],
+        [self.contentStack.bottomAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.bottomAnchor],
+        [self.contentStack.widthAnchor constraintEqualToAnchor:scroll.frameLayoutGuide.widthAnchor]
+    ]];
+    [self buildHeader];
+    self.statusLabel = [[UILabel alloc] init];
+    self.statusLabel.text = @"Loading full project information…";
+    self.statusLabel.textColor = UIColor.secondaryLabelColor;
+    self.statusLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
+    self.statusLabel.numberOfLines = 0;
+    [self.contentStack addArrangedSubview:self.statusLabel];
+    UIButton *versionsButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    versionsButton.translatesAutoresizingMaskIntoConstraints = NO;
+    versionsButton.backgroundColor = UIColor.systemBlueColor;
+    [versionsButton setTitle:@"View versions & download" forState:UIControlStateNormal];
+    [versionsButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    versionsButton.titleLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];
+    versionsButton.layer.cornerRadius = 12;
+    versionsButton.contentEdgeInsets = UIEdgeInsetsMake(14, 18, 14, 18);
+    [versionsButton addTarget:self action:@selector(openVersions) forControlEvents:UIControlEventTouchUpInside];
+    [self.contentStack addArrangedSubview:versionsButton];
+    [NSLayoutConstraint activateConstraints:@[[versionsButton.heightAnchor constraintGreaterThanOrEqualToConstant:50]]];
+    [self loadProjectDetails];
+}
+- (void)close { [self dismissViewControllerAnimated:YES completion:nil]; }
+- (void)openVersions {
+    if (self.versionsAction) self.versionsAction(self.project);
+}
+- (UILabel *)sectionTitle:(NSString *)title {
+    UILabel *label = [[UILabel alloc] init];
+    label.text = title;
+    label.font = [UIFont preferredFontForTextStyle:UIFontTextStyleTitle3];
+    label.textColor = UIColor.labelColor;
+    return label;
+}
+- (UILabel *)bodyLabel:(NSString *)text {
+    UILabel *label = [[UILabel alloc] init];
+    label.text = text;
+    label.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
+    label.textColor = UIColor.secondaryLabelColor;
+    label.numberOfLines = 0;
+    label.lineBreakMode = NSLineBreakByWordWrapping;
+    return label;
+}
+- (void)buildHeader {
+    UIStackView *header = [[UIStackView alloc] init];
+    header.axis = UILayoutConstraintAxisHorizontal;
+    header.spacing = 14;
+    header.alignment = UIStackViewAlignmentTop;
+    UIImageView *icon = [[UIImageView alloc] init];
+    icon.translatesAutoresizingMaskIntoConstraints = NO;
+    icon.contentMode = UIViewContentModeScaleAspectFit;
+    icon.clipsToBounds = YES;
+    icon.layer.cornerRadius = 14;
+    icon.backgroundColor = UIColor.secondarySystemGroupedBackgroundColor;
+    [NSLayoutConstraint activateConstraints:@[[icon.widthAnchor constraintEqualToConstant:76], [icon.heightAnchor constraintEqualToConstant:76]]];
+    NSString *iconURL = self.project[@"icon_url"];
+    if (iconURL.length) [self loadImageURL:iconURL completion:^(UIImage *image) { if (image) icon.image = image; }];
+    UIStackView *labels = [[UIStackView alloc] init];
+    labels.axis = UILayoutConstraintAxisVertical;
+    labels.spacing = 5;
+    UILabel *name = [self bodyLabel:self.project[@"title"] ?: @"Untitled mod"];
+    name.font = [UIFont preferredFontForTextStyle:UIFontTextStyleTitle2];
+    name.textColor = UIColor.labelColor;
+    UILabel *shortDescription = [self bodyLabel:self.project[@"description"] ?: @""];
+    UILabel *author = [self bodyLabel:[NSString stringWithFormat:@"by %@", self.project[@"author"] ?: @"Unknown author"]];
+    author.font = [UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];
+    [labels addArrangedSubview:name];
+    [labels addArrangedSubview:shortDescription];
+    [labels addArrangedSubview:author];
+    [header addArrangedSubview:icon];
+    [header addArrangedSubview:labels];
+    [self.contentStack addArrangedSubview:header];
+    [self.contentStack addArrangedSubview:[self sectionTitle:@"Overview"]];
+    NSNumber *downloads = self.project[@"downloads"];
+    NSNumber *followers = self.project[@"follows"] ?: self.project[@"followers"];
+    NSString *stats = [NSString stringWithFormat:@"%@ downloads  •  %@ followers",
+        downloads ? [NSNumberFormatter localizedStringFromNumber:downloads numberStyle:NSNumberFormatterDecimalStyle] : @"—",
+        followers ? [NSNumberFormatter localizedStringFromNumber:followers numberStyle:NSNumberFormatterDecimalStyle] : @"—"];
+    [self.contentStack addArrangedSubview:[self bodyLabel:stats]];
+}
+- (void)loadProjectDetails {
+    NSString *projectID = self.project[@"project_id"] ?: self.project[@"id"] ?: @"";
+    if (!projectID.length) { self.statusLabel.text = @"Full project details are unavailable."; return; }
+    BOOL curseForge = [self.project[@"source"] isEqual:@"curseforge"];
+    NSString *urlString = curseForge
+        ? [NSString stringWithFormat:@"https://api.curseforge.com/v1/mods/%@", projectID]
+        : [NSString stringWithFormat:@"https://api.modrinth.com/v2/project/%@", projectID];
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:urlString]];
+    request.timeoutInterval = 25;
+    [request setValue:@"Amethyst-iOS-ModBrowser/1.3" forHTTPHeaderField:@"User-Agent"];
+    if (curseForge) [request setValue:[[NSUserDefaults standardUserDefaults] stringForKey:@"AmethystCurseForgeAPIKey"] ?: @"" forHTTPHeaderField:@"x-api-key"];
+    __weak typeof(self) weakSelf = self;
+    [[NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        NSDictionary *json = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+        NSDictionary *detail = curseForge && [json[@"data"] isKindOfClass:NSDictionary.class] ? json[@"data"] : json;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            __strong typeof(weakSelf) self = weakSelf;
+            if (!self) return;
+            if (error || ![detail isKindOfClass:NSDictionary.class] || !detail.count) {
+                self.statusLabel.text = @"Couldn’t load the full description. You can still view available versions.";
+                return;
+            }
+            if (!curseForge) {
+                self.project = [self.project mutableCopy];
+                NSMutableDictionary *merged = [self.project mutableCopy];
+                [merged addEntriesFromDictionary:detail];
+                self.project = merged;
+            }
+            self.statusLabel.text = nil;
+            [self.statusLabel removeFromSuperview];
+            [self addGalleryFromProject:detail curseForge:curseForge];
+            NSArray *categories = [detail[@"categories"] isKindOfClass:NSArray.class] ? detail[@"categories"] : (detail[@"classifiers"] ?: @[]);
+            if ([categories isKindOfClass:NSArray.class] && [categories count]) {
+                [self.contentStack addArrangedSubview:[self sectionTitle:@"Categories"]];
+                NSMutableArray *categoryNames = [NSMutableArray array];
+                for (id item in categories) {
+                    if ([item isKindOfClass:NSString.class]) [categoryNames addObject:item];
+                    else if ([item isKindOfClass:NSDictionary.class] && item[@"name"]) [categoryNames addObject:item[@"name"]];
+                }
+                if (categoryNames.count) [self.contentStack addArrangedSubview:[self bodyLabel:[categoryNames componentsJoinedByString:@"  •  "]]];
+            }
+            NSArray *loaders = [detail[@"loaders"] isKindOfClass:NSArray.class] ? detail[@"loaders"] : @[];
+            NSArray *gameVersions = [detail[@"game_versions"] isKindOfClass:NSArray.class] ? detail[@"game_versions"] : @[];
+            if (loaders.count || gameVersions.count) {
+                [self.contentStack addArrangedSubview:[self sectionTitle:@"Compatibility"]];
+                if (loaders.count) [self.contentStack addArrangedSubview:[self bodyLabel:[NSString stringWithFormat:@"Loaders: %@", [loaders componentsJoinedByString:@", "]]]];
+                if (gameVersions.count) {
+                    NSArray *displayVersions = gameVersions.count > 30 ? [gameVersions subarrayWithRange:NSMakeRange(0, 30)] : gameVersions;
+                    NSString *versionText = [displayVersions componentsJoinedByString:@", "];
+                    if (gameVersions.count > displayVersions.count) versionText = [versionText stringByAppendingString:@"…"];
+                    [self.contentStack addArrangedSubview:[self bodyLabel:[NSString stringWithFormat:@"Minecraft: %@", versionText]]];
+                }
+            }
+            NSString *license = [detail[@"license"] isKindOfClass:NSDictionary.class] ? (detail[@"license"][@"name"] ?: detail[@"license"][@"id"]) : detail[@"license"];
+            if ([license isKindOfClass:NSString.class] && license.length) {
+                [self.contentStack addArrangedSubview:[self sectionTitle:@"License"]];
+                [self.contentStack addArrangedSubview:[self bodyLabel:license]];
+            }
+            NSString *body = [detail[@"body"] isKindOfClass:NSString.class] ? detail[@"body"] : @"";
+            if (body.length) {
+                [self.contentStack addArrangedSubview:[self sectionTitle:@"Description"]];
+                // Keep Markdown source readable without adding a third-party renderer.
+                body = [body stringByReplacingOccurrencesOfString:@"\r\n" withString:@"\n"];
+                [self.contentStack addArrangedSubview:[self bodyLabel:body]];
+            }
+            NSString *updated = detail[@"updated"] ?: detail[@"dateModified"] ?: @"";
+            if ([updated isKindOfClass:NSString.class] && updated.length >= 10) {
+                [self.contentStack addArrangedSubview:[self bodyLabel:[NSString stringWithFormat:@"Last updated: %@", [updated substringToIndex:10]]]];
+            }
+        });
+    }] resume];
+}
+- (void)addGalleryFromProject:(NSDictionary *)detail curseForge:(BOOL)curseForge {
+    NSArray *gallery = [detail[@"gallery"] isKindOfClass:NSArray.class] ? detail[@"gallery"] : @[];
+    NSMutableArray<NSString *> *urls = [NSMutableArray array];
+    for (id item in gallery) {
+        NSString *url = [item isKindOfClass:NSString.class] ? item : ([item isKindOfClass:NSDictionary.class] ? (item[@"url"] ?: item[@"thumbnailUrl"]) : nil);
+        if (url.length && ![urls containsObject:url]) [urls addObject:url];
+    }
+    if (curseForge && !urls.count) {
+        NSArray *screenshots = [detail[@"screenshots"] isKindOfClass:NSArray.class] ? detail[@"screenshots"] : @[];
+        for (NSDictionary *item in screenshots) if ([item[@"url"] isKindOfClass:NSString.class]) [urls addObject:item[@"url"]];
+    }
+    self.galleryURLs = urls;
+    if (!urls.count) return;
+    [self.contentStack addArrangedSubview:[self sectionTitle:@"Screenshots"]];
+    UIScrollView *horizontal = [[UIScrollView alloc] init];
+    horizontal.translatesAutoresizingMaskIntoConstraints = NO;
+    horizontal.showsHorizontalScrollIndicator = YES;
+    horizontal.alwaysBounceHorizontal = YES;
+    UIStackView *row = [[UIStackView alloc] init];
+    row.translatesAutoresizingMaskIntoConstraints = NO;
+    row.axis = UILayoutConstraintAxisHorizontal;
+    row.spacing = 10;
+    [horizontal addSubview:row];
+    [NSLayoutConstraint activateConstraints:@[
+        [row.leadingAnchor constraintEqualToAnchor:horizontal.contentLayoutGuide.leadingAnchor],
+        [row.trailingAnchor constraintEqualToAnchor:horizontal.contentLayoutGuide.trailingAnchor],
+        [row.topAnchor constraintEqualToAnchor:horizontal.contentLayoutGuide.topAnchor],
+        [row.bottomAnchor constraintEqualToAnchor:horizontal.contentLayoutGuide.bottomAnchor],
+        [row.heightAnchor constraintEqualToAnchor:horizontal.frameLayoutGuide.heightAnchor]
+    ]];
+    [NSLayoutConstraint activateConstraints:@[[horizontal.heightAnchor constraintEqualToConstant:190]]];
+    [self.contentStack insertArrangedSubview:horizontal atIndex:2];
+    for (NSUInteger index = 0; index < urls.count; index++) {
+        NSString *url = urls[index];
+        UIButton *imageButton = [UIButton buttonWithType:UIButtonTypeCustom];
+        imageButton.translatesAutoresizingMaskIntoConstraints = NO;
+        imageButton.tag = (NSInteger)index;
+        imageButton.imageView.contentMode = UIViewContentModeScaleAspectFill;
+        imageButton.clipsToBounds = YES;
+        imageButton.layer.cornerRadius = 10;
+        imageButton.backgroundColor = UIColor.secondarySystemGroupedBackgroundColor;
+        [NSLayoutConstraint activateConstraints:@[[imageButton.widthAnchor constraintEqualToConstant:270], [imageButton.heightAnchor constraintEqualToConstant:170]]];
+        [imageButton addTarget:self action:@selector(openGalleryImage:) forControlEvents:UIControlEventTouchUpInside];
+        [row addArrangedSubview:imageButton];
+        [self loadImageURL:url completion:^(UIImage *image) {
+            if (image) [imageButton setImage:image forState:UIControlStateNormal];
+            else [imageButton setTitle:@"Image unavailable" forState:UIControlStateNormal];
+        }];
+    }
+}
+- (void)loadImageURL:(NSString *)urlString completion:(void (^)(UIImage *image))completion {
+    NSURL *url = [NSURL URLWithString:urlString ?: @""];
+    if (!url) { if (completion) completion(nil); return; }
+    [[NSURLSession.sharedSession dataTaskWithURL:url completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        UIImage *image = data && !error ? [UIImage imageWithData:data] : nil;
+        dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(image); });
+    }] resume];
+}
+- (void)openGalleryImage:(UIButton *)sender {
+    if (sender.tag < 0 || sender.tag >= self.galleryURLs.count) return;
+    UIViewController *viewer = [[UIViewController alloc] init];
+    viewer.view.backgroundColor = UIColor.blackColor;
+    UIImageView *imageView = [[UIImageView alloc] initWithFrame:viewer.view.bounds];
+    imageView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    imageView.contentMode = UIViewContentModeScaleAspectFit;
+    [viewer.view addSubview:imageView];
+    [self loadImageURL:self.galleryURLs[sender.tag] completion:^(UIImage *image) { imageView.image = image; }];
+    viewer.modalPresentationStyle = UIModalPresentationFullScreen;
+    [self presentViewController:viewer animated:YES completion:nil];
+    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:viewer action:@selector(dismissViewControllerAnimated:completion:)];
+    [viewer.view addGestureRecognizer:tap];
+}
+@end
+
+
 @interface ModBrowserViewController ()
 @property(nonatomic) UISearchController *searchController;
 @property(nonatomic) NSMutableArray<NSDictionary *> *projects;
@@ -625,13 +904,21 @@
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     NSDictionary *project = self.projects[indexPath.row];
-    ModVersionListController *versions = [[ModVersionListController alloc] initWithProject:project loader:self.loader minecraftVersion:self.minecraftVersion];
     __weak typeof(self) weakSelf = self;
-    versions.versionSelected = ^(NSDictionary *version) {
+    ModProjectDetailsController *details = [[ModProjectDetailsController alloc] initWithProject:project loader:self.loader minecraftVersion:self.minecraftVersion versionsAction:^(NSDictionary *updatedProject) {
         __strong typeof(weakSelf) self = weakSelf;
-        if (self) [self dismissViewControllerAnimated:YES completion:^{ [self showDetailsForVersion:version project:project]; }];
-    };
-    UINavigationController *navigation = [[UINavigationController alloc] initWithRootViewController:versions];
+        if (!self) return;
+        [self dismissViewControllerAnimated:YES completion:^{
+            ModVersionListController *versions = [[ModVersionListController alloc] initWithProject:updatedProject loader:self.loader minecraftVersion:self.minecraftVersion];
+            versions.versionSelected = ^(NSDictionary *version) {
+                [self dismissViewControllerAnimated:YES completion:^{ [self showDetailsForVersion:version project:updatedProject]; }];
+            };
+            UINavigationController *versionNavigation = [[UINavigationController alloc] initWithRootViewController:versions];
+            versionNavigation.modalPresentationStyle = UIModalPresentationPageSheet;
+            [self presentViewController:versionNavigation animated:YES completion:nil];
+        }];
+    }];
+    UINavigationController *navigation = [[UINavigationController alloc] initWithRootViewController:details];
     navigation.modalPresentationStyle = UIModalPresentationPageSheet;
     [self presentViewController:navigation animated:YES completion:nil];
 }
