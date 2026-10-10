@@ -866,6 +866,8 @@
     self.curseForgeAPIKey = [[NSUserDefaults standardUserDefaults] stringForKey:@"AmethystCurseForgeAPIKey"] ?: @"";
     self.sourceControl = [[UISegmentedControl alloc] initWithItems:@[@"Modrinth", @"CurseForge"]];
     self.sourceControl.selectedSegmentIndex = 0;
+    NSString *initialTypeLabel = [self.projectType isEqualToString:@"resourcepack"] ? @"resource packs" : ([self.projectType isEqualToString:@"shader"] ? @"shaders" : ([self.projectType isEqualToString:@"datapack"] ? @"data packs" : @"mods"));
+    self.searchController.searchBar.placeholder = [NSString stringWithFormat:@"Search %@ on Modrinth", initialTypeLabel];
     [self.sourceControl addTarget:self action:@selector(sourceChanged:) forControlEvents:UIControlEventValueChanged];
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"slider.horizontal.3"] style:UIBarButtonItemStylePlain target:self action:@selector(showFilters)];
     self.definesPresentationContext = YES;
@@ -1006,7 +1008,7 @@
         NSMutableArray<NSArray<NSString *> *> *facetGroups = [NSMutableArray arrayWithObject:@[[NSString stringWithFormat:@"project_type:%@", self.projectType ?: @"mod"]]];
         if ([self.projectType isEqualToString:@"mod"]) [facetGroups addObject:@[[NSString stringWithFormat:@"categories:%@", self.loader]]];
         if (self.minecraftVersion.length) [facetGroups addObject:@[[NSString stringWithFormat:@"versions:%@", self.minecraftVersion]]];
-        if ([self isSTLauncherMode] && [[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalAdvancedSearch"]) {
+        if ([self isSTLauncherMode] && [self.projectType isEqualToString:@"mod"] && [[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalAdvancedSearch"]) {
             if ([self.environmentFilter isEqualToString:@"client"]) [facetGroups addObject:@[@"client_side:required"]];
             else if ([self.environmentFilter isEqualToString:@"server"]) [facetGroups addObject:@[@"server_side:required"]];
         }
