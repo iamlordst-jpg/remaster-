@@ -1210,6 +1210,11 @@ static NSString * const STLauncherModeKey = @"STLauncherExperimentalMode";
 @end
 
 @implementation STLauncherModeViewController
+- (instancetype)init {
+    self = [super init];
+    if (self) self.title = @"Launcher";
+    return self;
+}
 - (NSString *)imageName { return @"switch.2"; }
 - (void)viewDidLoad {
     [super viewDidLoad];
@@ -1279,6 +1284,11 @@ static NSString * const STLauncherModeKey = @"STLauncherExperimentalMode";
 @end
 
 @implementation STLauncherHomeViewController
+- (instancetype)init {
+    self = [super init];
+    if (self) self.title = @"STLauncher";
+    return self;
+}
 - (NSString *)imageName { return @"sparkles"; }
 - (void)viewDidLoad {
     [super viewDidLoad];
