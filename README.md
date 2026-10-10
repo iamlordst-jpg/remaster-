@@ -20,8 +20,10 @@ These features are regular options—not experimental screens—and are **off by
 - **Turbo Downloads** — increases the per-host connection limit, prioritizes the download task, and allows more time for a transfer to finish. Actual speed still depends on the server and network.
 
 ### Downloads
-- Display download progress, transferred bytes, approximate speed, and estimated remaining time when available.
+- Download Manager tracks background transfers and downloaded files, shows current transfer status/progress, and lets you delete files or remove entries from history.
+- Background Downloads is a toggle in the filter/settings menu and is off by default; when enabled, downloads continue independently of the browser screen and appear in Download Manager.
 - Save files in the app's `Documents/ST Mod Browser/` directory, organized by project type.
+- Favorites and named Collections are available from the Library button and project-row swipe actions; both are enabled by default.
 - Avoid overwriting an existing file when downloading the same filename again.
 - Downloads are saved files; they are not automatically installed into an active Minecraft instance.
 
