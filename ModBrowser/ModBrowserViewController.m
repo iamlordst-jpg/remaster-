@@ -207,7 +207,7 @@
             [NSURLQueryItem queryItemWithName:@"pageSize" value:@"50"],
             [NSURLQueryItem queryItemWithName:@"index" value:[NSString stringWithFormat:@"%ld", (long)self.offset]], nil];
         NSDictionary *loaderIDs = @{@"forge":@"1", @"fabric":@"4", @"quilt":@"5", @"neoforge":@"6"};
-        [items addObject:[NSURLQueryItem queryItemWithName:@"modLoaderType" value:loaderIDs[self.loader] ?: @"1"]];
+        if ([self.projectType isEqualToString:@"mod"]) [items addObject:[NSURLQueryItem queryItemWithName:@"modLoaderType" value:loaderIDs[self.loader] ?: @"1"]];
         if (self.minecraftVersion.length) [items addObject:[NSURLQueryItem queryItemWithName:@"gameVersion" value:self.minecraftVersion]];
         NSURLComponents *components = [NSURLComponents componentsWithString:[NSString stringWithFormat:@"https://api.curseforge.com/v1/mods/%@/files", self.project[@"project_id"] ?: @""]];
         components.queryItems = items;
@@ -782,6 +782,7 @@
 @property(nonatomic) BOOL showFavoritesOnly;
 @property(nonatomic) NSString *selectedCollectionName;
 @property(nonatomic) NSString *environmentFilter;
+@property(nonatomic) NSString *projectType;
 @property(nonatomic) NSTimer *downloadProgressTimer;
 @property(nonatomic) UIAlertController *activeDownloadAlert;
 @property(nonatomic) NSURLSessionDownloadTask *activeDownloadTask;
@@ -798,7 +799,9 @@
         self.loader = @"fabric";
         self.query = @"";
         self.sortOrder = @"relevance";
-        self.environmentFilter = [[NSUserDefaults standardUserDefaults] stringForKey:@"STLauncherSearchEnvironment"] ?: @"any";
+        NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+        self.environmentFilter = [defaults stringForKey:@"STLauncherSearchEnvironment"] ?: @"any";
+        self.projectType = [defaults boolForKey:@"STLauncherExperimentalMode"] ? ([defaults stringForKey:@"STLauncherProjectType"] ?: @"mod") : @"mod";
         self.projects = [NSMutableArray array];
         self.iconCache = [[NSCache alloc] init];
         self.iconCache.countLimit = 250;
@@ -973,7 +976,7 @@
         if (!self.curseForgeAPIKey.length) { self.loading = NO; [self.activity stopAnimating]; [self promptForCurseForgeKeyThenSearch]; return; }
         NSMutableArray<NSURLQueryItem *> *items = [NSMutableArray arrayWithObjects:
             [NSURLQueryItem queryItemWithName:@"gameId" value:@"432"],
-            [NSURLQueryItem queryItemWithName:@"classId" value:@"6"],
+            [NSURLQueryItem queryItemWithName:@"classId" value:([self.projectType isEqualToString:@"resourcepack"] ? @"12" : ([self.projectType isEqualToString:@"shader"] ? @"6552" : ([self.projectType isEqualToString:@"datapack"] ? @"6945" : @"6"))) ],
             [NSURLQueryItem queryItemWithName:@"searchFilter" value:self.query ?: @""],
             [NSURLQueryItem queryItemWithName:@"pageSize" value:@"20"],
             [NSURLQueryItem queryItemWithName:@"index" value:[NSString stringWithFormat:@"%ld", (long)self.offset]],
@@ -987,8 +990,8 @@
         request = [NSMutableURLRequest requestWithURL:components.URL];
         [request setValue:self.curseForgeAPIKey forHTTPHeaderField:@"x-api-key"];
     } else {
-        NSMutableArray<NSArray<NSString *> *> *facetGroups = [NSMutableArray arrayWithObject:@[@"project_type:mod"]];
-        [facetGroups addObject:@[[NSString stringWithFormat:@"categories:%@", self.loader]]];
+        NSMutableArray<NSArray<NSString *> *> *facetGroups = [NSMutableArray arrayWithObject:@[[NSString stringWithFormat:@"project_type:%@", self.projectType ?: @"mod"]]];
+        if ([self.projectType isEqualToString:@"mod"]) [facetGroups addObject:@[[NSString stringWithFormat:@"categories:%@", self.loader]]];
         if (self.minecraftVersion.length) [facetGroups addObject:@[[NSString stringWithFormat:@"versions:%@", self.minecraftVersion]]];
         if ([self isSTLauncherMode] && [[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalAdvancedSearch"]) {
             if ([self.environmentFilter isEqualToString:@"client"]) [facetGroups addObject:@[@"client_side:required"]];
@@ -1075,6 +1078,18 @@
                 self.loader = loader;
                 [self searchForProjectsReset:YES];
             }]];
+    }
+    if ([self isSTLauncherMode] && [[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalAdvancedSearch"]) {
+        for (NSString *type in @[@"mod", @"resourcepack", @"shader", @"datapack"]) {
+            NSString *label = [type isEqualToString:@"mod"] ? @"Content: Mods" : ([type isEqualToString:@"resourcepack"] ? @"Content: Resource packs" : ([type isEqualToString:@"shader"] ? @"Content: Shaders" : @"Content: Data packs"));
+            if ([self.projectType isEqualToString:type]) label = [label stringByAppendingString:@" ✓"];
+            [alert addAction:[UIAlertAction actionWithTitle:label style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+                self.projectType = type;
+                [[NSUserDefaults standardUserDefaults] setObject:type forKey:@"STLauncherProjectType"];
+                if (![type isEqualToString:@"mod"]) self.showFavoritesOnly = NO;
+                [self searchForProjectsReset:YES];
+            }]];
+        }
     }
     if ([self isSTLauncherMode] && [[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalAdvancedSearch"] && !self.curseForgeSource) {
         for (NSString *environment in @[@"any", @"client", @"server"]) {
@@ -1330,7 +1345,7 @@
     NSString *message = [NSString stringWithFormat:@"%@\nMinecraft: %@\nLoader: %@\n\nDependencies:\n%@", name, [gameVersions componentsJoinedByString:@", "], self.loader.capitalizedString, dependencySummary];
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:project[@"title"] ?: @"Mod details" message:message preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"Back" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Install .jar" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+    [alert addAction:[UIAlertAction actionWithTitle:([self.projectType isEqualToString:@"mod"] ? @"Download .jar" : @"Download archive") style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         [self downloadVersion:version project:project];
     }]];
     [self presentViewController:alert animated:YES completion:nil];
@@ -1357,7 +1372,12 @@
     if (!file) for (NSDictionary *candidate in files) {
         if ([[candidate[@"filename"] lowercaseString] hasSuffix:@".jar"]) { file = candidate; break; }
     }
-    if (!file) { [self showMessage:@"No downloadable .jar was found for this version." title:@"Cannot install mod"]; return; }
+    NSString *targetExtension = [self.projectType isEqualToString:@"mod"] ? @".jar" : @".zip";
+    if (!file || ![[file[@"filename"] lowercaseString] hasSuffix:targetExtension]) {
+        file = nil;
+        for (NSDictionary *candidate in files) if ([[candidate[@"filename"] lowercaseString] hasSuffix:targetExtension]) { file = candidate; break; }
+    }
+    if (!file) { [self showMessage:[NSString stringWithFormat:@"No downloadable %@ file was found for this version.", targetExtension] title:@"Download unavailable"]; return; }
     NSURL *url = [NSURL URLWithString:file[@"url"] ?: @""];
     if (!url || !url.scheme.length) { [self showMessage:@"This version has no accessible download URL." title:@"Download failed"]; return; }
     NSString *directory = [self modsDirectoryForSelectedProfile];
@@ -1384,7 +1404,9 @@
     NSURLSessionConfiguration *configuration = NSURLSessionConfiguration.defaultSessionConfiguration;
     configuration.requestCachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
     configuration.timeoutIntervalForResource = turboDownloads ? 240 : 180;
-    configuration.HTTPMaximumConnectionsPerHost = turboDownloads ? 12 : 6;
+    NSInteger configuredConnections = [[NSUserDefaults standardUserDefaults] integerForKey:@"STLauncherDownloadConcurrency"];
+    if (configuredConnections < 2) configuredConnections = 6;
+    configuration.HTTPMaximumConnectionsPerHost = turboDownloads ? 12 : MIN(12, MAX(2, configuredConnections));
     configuration.URLCache = nil;
     NSURLSession *session = [NSURLSession sessionWithConfiguration:configuration];
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
@@ -1618,6 +1640,7 @@ static NSString * const STLauncherModeKey = @"STLauncherExperimentalMode";
         @[@"Downloads & History", @"arrow.down.circle", @"STLauncherDownloadsViewController"],
         @[@"Library & Favorites", @"books.vertical", @"ModBrowserViewController"],
         @[@"Minecraft Profiles", @"person.crop.square", @"LauncherProfilesViewController"],
+        @[@"STLauncher Settings", @"slider.horizontal.3", @"STLauncherSettingsViewController"],
         @[@"Amethyst Settings", @"gearshape", @"LauncherPreferencesViewController"]
     ];
     for (NSArray *item in items) {
@@ -1664,7 +1687,7 @@ static NSString * const STLauncherModeKey = @"STLauncherExperimentalMode";
     ]];
 }
 - (void)openDestination:(UIButton *)sender {
-    NSArray *names = @[@"ModBrowserViewController", @"STLauncherDownloadsViewController", @"ModBrowserViewController", @"LauncherProfilesViewController", @"LauncherPreferencesViewController"];
+    NSArray *names = @[@"ModBrowserViewController", @"STLauncherDownloadsViewController", @"ModBrowserViewController", @"LauncherProfilesViewController", @"STLauncherSettingsViewController", @"LauncherPreferencesViewController"];
     if (sender.tag < 0 || sender.tag >= names.count) return;
     Class cls = NSClassFromString(names[sender.tag]);
     if (!cls) return;
@@ -1698,6 +1721,118 @@ static NSString * const STLauncherModeKey = @"STLauncherExperimentalMode";
     [[NSUserDefaults standardUserDefaults] setBool:NO forKey:STLauncherModeKey];
     Class newsClass = NSClassFromString(@"LauncherNewsViewController");
     if (newsClass) [self.navigationController setViewControllers:@[[[newsClass alloc] init]] animated:YES];
+}
+@end
+
+@interface STLauncherSettingsViewController : UITableViewController
+@property(nonatomic) UISegmentedControl *appearanceControl;
+@property(nonatomic) UISegmentedControl *loaderControl;
+@property(nonatomic) UISegmentedControl *sortControl;
+@property(nonatomic) UILabel *connectionCountLabel;
+@property(nonatomic) UIStepper *connectionStepper;
+@end
+
+@implementation STLauncherSettingsViewController
+- (instancetype)init {
+    self = [super initWithStyle:UITableViewStyleInsetGrouped];
+    if (self) self.title = @"STLauncher Settings";
+    return self;
+}
+- (NSString *)imageName { return @"slider.horizontal.3"; }
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = @"STLauncher Settings";
+    self.tableView.rowHeight = 84;
+    self.tableView.tableFooterView = [[UIView alloc] initWithFrame:CGRectZero];
+    self.appearanceControl = [[UISegmentedControl alloc] initWithItems:@[@"System", @"Light", @"Dark", @"Purple"]];
+    self.appearanceControl.tag = 0;
+    [self.appearanceControl addTarget:self action:@selector(settingChanged:) forControlEvents:UIControlEventValueChanged];
+    self.loaderControl = [[UISegmentedControl alloc] initWithItems:@[@"Forge", @"Fabric", @"Quilt", @"Neo"]];
+    self.loaderControl.tag = 1;
+    [self.loaderControl addTarget:self action:@selector(settingChanged:) forControlEvents:UIControlEventValueChanged];
+    self.sortControl = [[UISegmentedControl alloc] initWithItems:@[@"Relevant", @"Downloads", @"Updated"]];
+    self.sortControl.tag = 2;
+    [self.sortControl addTarget:self action:@selector(settingChanged:) forControlEvents:UIControlEventValueChanged];
+    self.connectionStepper = [[UIStepper alloc] init];
+    self.connectionStepper.minimumValue = 2;
+    self.connectionStepper.maximumValue = 12;
+    self.connectionStepper.stepValue = 1;
+    [self.connectionStepper addTarget:self action:@selector(connectionChanged:) forControlEvents:UIControlEventValueChanged];
+    self.connectionCountLabel = [[UILabel alloc] init];
+    self.connectionCountLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
+    self.connectionCountLabel.textAlignment = NSTextAlignmentRight;
+    [self reloadSettings];
+}
+- (void)reloadSettings {
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    NSString *appearance = [defaults stringForKey:@"STLauncherAppearance"] ?: @"system";
+    NSArray *appearances = @[@"system", @"light", @"dark", @"purple"];
+    self.appearanceControl.selectedSegmentIndex = MAX(0, (NSInteger)[appearances indexOfObject:appearance]);
+    NSString *loader = [defaults stringForKey:@"STLauncherDefaultLoader"] ?: @"fabric";
+    NSArray *loaders = @[@"forge", @"fabric", @"quilt", @"neoforge"];
+    self.loaderControl.selectedSegmentIndex = MAX(0, (NSInteger)[loaders indexOfObject:loader]);
+    NSString *sort = [defaults stringForKey:@"STLauncherDefaultSort"] ?: @"relevance";
+    NSArray *sorts = @[@"relevance", @"downloads", @"updated"];
+    self.sortControl.selectedSegmentIndex = MAX(0, (NSInteger)[sorts indexOfObject:sort]);
+    NSInteger connections = [defaults integerForKey:@"STLauncherDownloadConcurrency"];
+    if (connections < 2) connections = 6;
+    self.connectionStepper.value = MIN(12, MAX(2, connections));
+    self.connectionCountLabel.text = [NSString stringWithFormat:@"%ld", (long)self.connectionStepper.value];
+}
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 3; }
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return 1; }
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
+    return @[@"Appearance", @"Default browser filters", @"Download performance"][section];
+}
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"st-settings-cell"];
+    if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"st-settings-cell"];
+    cell.selectionStyle = UITableViewCellSelectionStyleNone;
+    cell.detailTextLabel.numberOfLines = 0;
+    if (indexPath.section == 0) {
+        cell.textLabel.text = @"Appearance";
+        cell.detailTextLabel.text = @"Choose System, Light, Dark, or ST's purple theme.";
+        cell.accessoryView = self.appearanceControl;
+    } else if (indexPath.section == 1) {
+        cell.textLabel.text = @"Default loader & sorting";
+        cell.detailTextLabel.text = @"Used when opening the STLauncher browser. Filters can still be changed at any time.";
+        UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[self.loaderControl, self.sortControl]];
+        stack.axis = UILayoutConstraintAxisVertical;
+        stack.spacing = 6;
+        stack.frame = CGRectMake(0, 0, 280, 64);
+        cell.accessoryView = stack;
+    } else {
+        cell.textLabel.text = @"Concurrent connections";
+        cell.detailTextLabel.text = @"Affects concurrent transfers only; it does not make a single server-limited file download faster.";
+        UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[self.connectionCountLabel, self.connectionStepper]];
+        stack.axis = UILayoutConstraintAxisHorizontal;
+        stack.spacing = 8;
+        [self.connectionCountLabel setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+        stack.frame = CGRectMake(0, 0, 100, 32);
+        cell.accessoryView = stack;
+    }
+    return cell;
+}
+- (void)settingChanged:(UISegmentedControl *)sender {
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    if (sender.tag == 0) {
+        NSArray *values = @[@"system", @"light", @"dark", @"purple"];
+        NSString *value = values[sender.selectedSegmentIndex];
+        [defaults setObject:value forKey:@"STLauncherAppearance"];
+        [defaults setBool:[value isEqualToString:@"purple"] forKey:@"STLauncherExperimentalUI"];
+        self.overrideUserInterfaceStyle = [value isEqualToString:@"dark"] || [value isEqualToString:@"purple"] ? UIUserInterfaceStyleDark : ([value isEqualToString:@"light"] ? UIUserInterfaceStyleLight : UIUserInterfaceStyleUnspecified);
+        [self.tableView reloadData];
+    } else if (sender.tag == 1) {
+        NSArray *values = @[@"forge", @"fabric", @"quilt", @"neoforge"];
+        [defaults setObject:values[sender.selectedSegmentIndex] forKey:@"STLauncherDefaultLoader"];
+    } else if (sender.tag == 2) {
+        NSArray *values = @[@"relevance", @"downloads", @"updated"];
+        [defaults setObject:values[sender.selectedSegmentIndex] forKey:@"STLauncherDefaultSort"];
+    }
+}
+- (void)connectionChanged:(UIStepper *)sender {
+    [[NSUserDefaults standardUserDefaults] setInteger:(NSInteger)sender.value forKey:@"STLauncherDownloadConcurrency"];
+    self.connectionCountLabel.text = [NSString stringWithFormat:@"%ld", (long)sender.value];
 }
 @end
 
