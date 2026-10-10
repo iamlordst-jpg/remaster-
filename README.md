@@ -1,6 +1,6 @@
 # STLauncher
 
-**A custom iOS Minecraft Java launcher based on Amethyst-iOS and Amethyst-Offline, with an integrated Modrinth browser.**
+**An experimental iOS Minecraft Java launcher based on Amethyst-iOS and Amethyst-Offline, with a built-in Modrinth browser and selectable launcher interface.**
 
 STLauncher is a community-made project and is not an official Amethyst, Mojang, or Microsoft product.
 
@@ -11,9 +11,13 @@ STLauncher is a community-made project and is not an official Amethyst, Mojang, 
 - **Minecraft version and mod-loader filters** — narrow results by game version and supported loader.
 - **Project details** — view descriptions, screenshots, compatibility information, links, and available versions.
 - **Download mods in-app** — save downloads to the ST Mod Browser folder in the app's Documents directory.
+- **Launcher selector** — keep Amethyst as the default or switch to the experimental STLauncher purple home screen.
+- **Optional experimental features** — thumbnail prefetching and compact result cards are individually toggleable and off by default.
+- **Faster thumbnail reuse** — cached icons and coalesced requests reduce repeated downloads while browsing.
+- **Browser organization** — sort results by relevance, downloads, or recent updates; group loader and Minecraft-version filters in one place.
 - **iPhone-friendly workflow** — developed from an iPhone, with GitHub Actions used for iOS builds.
 
-> **Note:** Files downloaded by the browser are saved in the separate `Documents/ST Mod Browser/mods/` folder. They are not automatically installed into Minecraft's active `mods` folder; move or import them into the correct Minecraft instance's mods folder before launching the game.
+> **Note:** Files downloaded by the browser are saved in the separate `Documents/ST Mod Browser/mods/` folder. They are not automatically installed into Minecraft's active `mods` folder; move or import them into the correct Minecraft instance's mods folder before launching the game. Download throughput still depends on the host and network; the app cannot bypass server-side speed limits.
 
 ## Getting STLauncher
 
