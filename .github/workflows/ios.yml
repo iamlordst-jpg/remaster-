@@ -155,6 +155,19 @@ jobs:
               '            }\n',
               1,
           )
+          initial_route = '        if(self.isInitialVc) {\n            self.isInitialVc = NO;\n        } else {\n'
+          if initial_route not in source:
+              raise SystemExit("Could not find initial launcher routing block")
+          source = source.replace(
+              initial_route,
+              '        if(self.isInitialVc) {\n'
+              '            self.isInitialVc = NO;\n'
+              '            if ([selected.vcArray.firstObject isKindOfClass:STLauncherHomeViewController.class]) {\n'
+              '                [contentNavigationController setViewControllers:selected.vcArray animated:NO];\n'
+              '            }\n'
+              '        } else {\n',
+              1,
+          )
           initial_selection = '    NSIndexPath *indexPath = [NSIndexPath indexPathForRow:1 inSection:0];\n'
           if initial_selection in source:
               source = source.replace(
