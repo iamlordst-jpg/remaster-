@@ -816,13 +816,17 @@
 - (BOOL)isExperimentalUIEnabled { return [self isSTLauncherMode] && [[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalUI"]; }
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
-    self.overrideUserInterfaceStyle = [self isExperimentalUIEnabled] ? UIUserInterfaceStyleDark : UIUserInterfaceStyleUnspecified;
-    if ([self isExperimentalUIEnabled]) {
-        self.tableView.backgroundColor = [UIColor colorWithRed:0.045 green:0.035 blue:0.075 alpha:1.0];
-        self.tableView.separatorColor = [UIColor colorWithWhite:1.0 alpha:0.09];
-        self.navigationController.navigationBar.tintColor = [UIColor colorWithRed:0.75 green:0.55 blue:1.0 alpha:1.0];
-    } else {
-        self.tableView.backgroundColor = UIColor.systemGroupedBackgroundColor;
+    if ([self isSTLauncherMode]) {
+        self.overrideUserInterfaceStyle = [self isExperimentalUIEnabled] ? UIUserInterfaceStyleDark : UIUserInterfaceStyleUnspecified;
+        if ([self isExperimentalUIEnabled]) {
+            self.tableView.backgroundColor = [UIColor colorWithRed:0.045 green:0.035 blue:0.075 alpha:1.0];
+            self.tableView.separatorColor = [UIColor colorWithWhite:1.0 alpha:0.09];
+            self.navigationController.navigationBar.tintColor = [UIColor colorWithRed:0.75 green:0.55 blue:1.0 alpha:1.0];
+        } else {
+            self.tableView.backgroundColor = UIColor.systemGroupedBackgroundColor;
+            self.tableView.separatorColor = nil;
+            self.navigationController.navigationBar.tintColor = nil;
+        }
     }
     [self layoutSourceControl];
     [self.tableView reloadData];
@@ -1194,13 +1198,6 @@
         cell.descriptionLabel.textColor = [UIColor colorWithWhite:0.76 alpha:1.0];
         cell.downloadsLabel.textColor = [UIColor colorWithWhite:0.58 alpha:1.0];
         cell.modIcon.backgroundColor = [UIColor colorWithRed:0.13 green:0.10 blue:0.20 alpha:1.0];
-    } else {
-        cell.backgroundColor = UIColor.secondarySystemGroupedBackgroundColor;
-        cell.contentView.backgroundColor = UIColor.secondarySystemGroupedBackgroundColor;
-        cell.nameLabel.textColor = UIColor.labelColor;
-        cell.descriptionLabel.textColor = UIColor.secondaryLabelColor;
-        cell.downloadsLabel.textColor = UIColor.tertiaryLabelColor;
-        cell.modIcon.backgroundColor = UIColor.secondarySystemGroupedBackgroundColor;
     }
     cell.nameLabel.text = project[@"title"] ?: @"Untitled mod";
     cell.descriptionLabel.text = project[@"description"] ?: @"";
@@ -1609,12 +1606,14 @@ static NSString * const STLauncherModeKey = @"STLauncherExperimentalMode";
     if (!cls) return;
     UIViewController *destination = [[cls alloc] init];
     if ([[NSUserDefaults standardUserDefaults] boolForKey:STLauncherModeKey] &&
-        [names[sender.tag] isEqualToString:@"ModBrowserViewController"]) {
+        [names[sender.tag] isEqualToString:@"ModBrowserViewController"] &&
+        [[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalUI"]) {
         destination.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
     }
     [self.navigationController pushViewController:destination animated:YES];
     if ([[NSUserDefaults standardUserDefaults] boolForKey:STLauncherModeKey] &&
-        [names[sender.tag] isEqualToString:@"ModBrowserViewController"]) {
+        [names[sender.tag] isEqualToString:@"ModBrowserViewController"] &&
+        [[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalUI"]) {
         destination.view.tintColor = [UIColor colorWithRed:0.68 green:0.42 blue:1.0 alpha:1.0];
     }
 }
