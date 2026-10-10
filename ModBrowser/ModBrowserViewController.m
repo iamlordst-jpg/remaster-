@@ -1305,11 +1305,13 @@
             };
             UINavigationController *versionNavigation = [[UINavigationController alloc] initWithRootViewController:versions];
             versionNavigation.modalPresentationStyle = UIModalPresentationPageSheet;
+            if ([self isDarkBrowserAppearance]) versionNavigation.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
             [self presentViewController:versionNavigation animated:YES completion:nil];
         }];
     }];
     UINavigationController *navigation = [[UINavigationController alloc] initWithRootViewController:details];
     navigation.modalPresentationStyle = UIModalPresentationPageSheet;
+    if ([self isDarkBrowserAppearance]) navigation.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
     [self presentViewController:navigation animated:YES completion:nil];
 }
 - (void)showDetailsForVersion:(NSDictionary *)version project:(NSDictionary *)project {
@@ -1709,17 +1711,15 @@ static NSString * const STLauncherModeKey = @"STLauncherExperimentalMode";
     if (sender.tag == 2 && [destination isKindOfClass:ModBrowserViewController.class]) {
         ((ModBrowserViewController *)destination).showFavoritesOnly = YES;
     }
-    if ([[NSUserDefaults standardUserDefaults] boolForKey:STLauncherModeKey] &&
-        [names[sender.tag] isEqualToString:@"ModBrowserViewController"] &&
-        [[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalUI"]) {
-        destination.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+    if ([[NSUserDefaults standardUserDefaults] boolForKey:STLauncherModeKey]) {
+        NSString *appearance = [[NSUserDefaults standardUserDefaults] stringForKey:@"STLauncherAppearance"] ?: @"system";
+        destination.overrideUserInterfaceStyle = [appearance isEqualToString:@"dark"] || [appearance isEqualToString:@"purple"] ? UIUserInterfaceStyleDark : ([appearance isEqualToString:@"light"] ? UIUserInterfaceStyleLight : UIUserInterfaceStyleUnspecified);
+        if ([names[sender.tag] isEqualToString:@"ModBrowserViewController"] &&
+            [[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalUI"]) {
+            destination.view.tintColor = [UIColor colorWithRed:0.68 green:0.42 blue:1.0 alpha:1.0];
+        }
     }
     [self.navigationController pushViewController:destination animated:YES];
-    if ([[NSUserDefaults standardUserDefaults] boolForKey:STLauncherModeKey] &&
-        [names[sender.tag] isEqualToString:@"ModBrowserViewController"] &&
-        [[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalUI"]) {
-        destination.view.tintColor = [UIColor colorWithRed:0.68 green:0.42 blue:1.0 alpha:1.0];
-    }
 }
 - (void)launchMinecraftFromHome:(UIButton *)sender {
     SEL launchSelector = NSSelectorFromString(@"performInstallOrShowDetails:");
@@ -1850,15 +1850,12 @@ static NSString * const STLauncherModeKey = @"STLauncherExperimentalMode";
     if (indexPath.section == 0) {
         title.text = @"Browser appearance";
         detail.text = @"Choose System, Light, Dark, or ST's purple browser theme.";
-        [self.appearanceControl.heightAnchor constraintEqualToConstant:32].active = YES;
         [stack addArrangedSubview:title];
         [stack addArrangedSubview:detail];
         [stack addArrangedSubview:self.appearanceControl];
     } else if (indexPath.section == 1) {
         title.text = @"Default loader & sorting";
         detail.text = @"Applied when the STLauncher browser opens. You can still change filters while browsing.";
-        [self.loaderControl.heightAnchor constraintEqualToConstant:32].active = YES;
-        [self.sortControl.heightAnchor constraintEqualToConstant:32].active = YES;
         [stack addArrangedSubview:title];
         [stack addArrangedSubview:detail];
         [stack addArrangedSubview:self.loaderControl];
@@ -1985,7 +1982,7 @@ static NSString * const STLauncherModeKey = @"STLauncherExperimentalMode";
         @{@"title":@"Turbo Downloads", @"detail":@"Prioritizes downloads and raises the connection limit for concurrent transfers. It cannot bypass the host or network's speed limit.", @"key":@"STLauncherExperimentalTurboDownloads"},
         @{@"title":@"Instant Thumbnails", @"detail":@"Prefetches the next batch of mod icons so they are ready before you scroll. Uses extra data.", @"key":@"STLauncherExperimentalInstantThumbnails"},
         @{@"title":@"Smart Mod Installer", @"detail":@"Checks the downloaded JAR against the source's SHA-1 hash when one is provided. Invalid files are discarded.", @"key":@"STLauncherExperimentalSmartInstaller"},
-        @{@"title":@"Advanced Mod Search", @"detail":@"Adds client-side and server-side environment filters to Modrinth search.", @"key":@"STLauncherExperimentalAdvancedSearch"},
+        @{@"title":@"Advanced Mod Search", @"detail":@"Adds Modrinth content-type filters (mods, resource packs, shaders, data packs) plus client-side and server-side environment filters.", @"key":@"STLauncherExperimentalAdvancedSearch"},
         @{@"title":@"Favorites & Collections", @"detail":@"Save projects with the star button and group saved projects into named collections.", @"key":@"STLauncherExperimentalFavoritesCollections"},
         @{@"title":@"Experimental UI", @"detail":@"Applies the dark purple STLauncher styling to the mod browser. Amethyst's default appearance is unchanged.", @"key":@"STLauncherExperimentalUI"},
         @{@"title":@"Download Diagnostics", @"detail":@"Shows HTTP status, file size, elapsed time and average transfer rate for the latest download.", @"key":@"STLauncherExperimentalDownloadDiagnostics"},
