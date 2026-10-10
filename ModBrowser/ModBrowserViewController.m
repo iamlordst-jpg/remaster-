@@ -782,6 +782,11 @@
 @property(nonatomic) BOOL showFavoritesOnly;
 @property(nonatomic) NSString *selectedCollectionName;
 @property(nonatomic) NSString *environmentFilter;
+@property(nonatomic) NSTimer *downloadProgressTimer;
+@property(nonatomic) UIAlertController *activeDownloadAlert;
+@property(nonatomic) NSURLSessionDownloadTask *activeDownloadTask;
+@property(nonatomic) NSDate *activeDownloadStartedAt;
+@property(nonatomic) NSString *activeDownloadFilename;
 @end
 
 @implementation ModBrowserViewController
@@ -1367,9 +1372,12 @@
         [self showMessage:[NSString stringWithFormat:@"%@ is already installed.", filename] title:@"Already downloaded"];
         return;
     }
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Downloading mod…" message:[NSString stringWithFormat:@"%@\n\nSaving to ST Mod Browser/mods.", filename] preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Downloading mod…" message:[NSString stringWithFormat:@"%@\n\nPreparing download…\nSaving to ST Mod Browser/mods.", filename] preferredStyle:UIAlertControllerStyleAlert];
+    self.activeDownloadAlert = alert;
+    self.activeDownloadFilename = filename;
     [self presentViewController:alert animated:YES completion:nil];
     NSDate *downloadStartedAt = [NSDate date];
+    self.activeDownloadStartedAt = downloadStartedAt;
     BOOL turboDownloads = [self isSTLauncherMode] && [[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalTurboDownloads"];
     BOOL smartInstaller = [self isSTLauncherMode] && [[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalSmartInstaller"];
     BOOL diagnosticsEnabled = [self isSTLauncherMode] && [[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalDownloadDiagnostics"];
@@ -1419,6 +1427,24 @@
             (long)httpResponse.statusCode, bytes, elapsed, elapsed > 0 ? ((double)bytes / 1024.0 / elapsed) : 0.0];
         [[NSUserDefaults standardUserDefaults] setObject:diagnostic forKey:@"STLauncherLastDownloadDiagnostics"];
         dispatch_async(dispatch_get_main_queue(), ^{
+            [self.downloadProgressTimer invalidate];
+            self.downloadProgressTimer = nil;
+            self.activeDownloadTask = nil;
+            self.activeDownloadAlert = nil;
+            self.activeDownloadStartedAt = nil;
+            NSMutableArray *history = [[[NSUserDefaults standardUserDefaults] arrayForKey:@"STLauncherDownloadHistory"] mutableCopy] ?: [NSMutableArray array];
+            BOOL downloadSucceeded = !(error || moveError);
+            [history insertObject:@{
+                @"filename": filename ?: @"mod.jar",
+                @"project": project[@"title"] ?: filename ?: @"Mod",
+                @"path": destination ?: @"",
+                @"date": @([[NSDate date] timeIntervalSince1970]),
+                @"size": @(bytes),
+                @"success": @(downloadSucceeded),
+                @"diagnostics": diagnostic ?: @""
+            } atIndex:0];
+            if (history.count > 30) [history removeObjectsInRange:NSMakeRange(30, history.count - 30)];
+            [[NSUserDefaults standardUserDefaults] setObject:history forKey:@"STLauncherDownloadHistory"];
             [alert dismissViewControllerAnimated:YES completion:^{
                 if (error || moveError) {
                     NSString *message = (error ?: moveError).localizedDescription ?: @"Download failed.";
@@ -1432,8 +1458,28 @@
             }];
         });
     }];
+    self.activeDownloadTask = task;
+    self.downloadProgressTimer = [NSTimer scheduledTimerWithTimeInterval:0.4 target:self selector:@selector(updateDownloadProgress) userInfo:nil repeats:YES];
     if (turboDownloads) task.priority = NSURLSessionTaskPriorityHigh;
     [task resume];
+}
+- (void)updateDownloadProgress {
+    NSURLSessionDownloadTask *task = self.activeDownloadTask;
+    UIAlertController *alert = self.activeDownloadAlert;
+    if (!task || !alert || !alert.presentingViewController) return;
+    int64_t received = task.countOfBytesReceived;
+    int64_t expected = task.countOfBytesExpectedToReceive;
+    NSTimeInterval elapsed = self.activeDownloadStartedAt ? [[NSDate date] timeIntervalSinceDate:self.activeDownloadStartedAt] : 0;
+    double speedKB = elapsed > 0 ? ((double)received / 1024.0 / elapsed) : 0;
+    NSString *progress = expected > 0
+        ? [NSString stringWithFormat:@"%.0f%%  •  %@ / %@", MIN(100.0, ((double)received / (double)expected) * 100.0),
+            [NSByteCountFormatter stringFromByteCount:received countStyle:NSByteCountFormatterCountStyleFile],
+            [NSByteCountFormatter stringFromByteCount:expected countStyle:NSByteCountFormatterCountStyleFile]]
+        : [NSString stringWithFormat:@"%@ received", [NSByteCountFormatter stringFromByteCount:received countStyle:NSByteCountFormatterCountStyleFile]];
+    NSString *eta = expected > received && speedKB > 0
+        ? [NSString stringWithFormat:@"\nETA: %@", [NSString stringWithFormat:@"%.0f sec", ((double)(expected - received) / 1024.0) / speedKB]]
+        : @"";
+    alert.message = [NSString stringWithFormat:@"%@\n\n%@\nSpeed: %.1f KB/s%@\nSaving to ST Mod Browser/mods.", self.activeDownloadFilename ?: @"Mod", progress, speedKB, eta];
 }
 - (void)showMessage:(NSString *)message title:(NSString *)title {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:title message:message preferredStyle:UIAlertControllerStyleAlert];
@@ -1524,6 +1570,7 @@ static NSString * const STLauncherModeKey = @"STLauncherExperimentalMode";
 
 @interface STLauncherHomeViewController ()
 @property(nonatomic) UIStackView *buttonStack;
+@property(nonatomic) UIButton *playButton;
 @end
 
 @implementation STLauncherHomeViewController
@@ -1548,16 +1595,28 @@ static NSString * const STLauncherModeKey = @"STLauncherExperimentalMode";
     title.font = [UIFont systemFontOfSize:34 weight:UIFontWeightBold];
     title.textColor = UIColor.whiteColor;
     UILabel *subtitle = [[UILabel alloc] init];
-    subtitle.text = @"Your Minecraft Java launcher, with a cleaner interface.";
+    NSString *selectedVersion = PLProfiles.current.selectedProfile[@"lastVersionId"] ?: @"No version selected";
+    subtitle.text = [NSString stringWithFormat:@"Selected version: %@\nYour Minecraft Java launcher, with a cleaner interface.", selectedVersion];
     subtitle.font = [UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];
     subtitle.textColor = [UIColor colorWithWhite:0.78 alpha:1.0];
     subtitle.numberOfLines = 0;
     UIStackView *intro = [[UIStackView alloc] initWithArrangedSubviews:@[eyebrow, title, subtitle]];
     intro.axis = UILayoutConstraintAxisVertical;
     intro.spacing = 8;
+    self.playButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [self.playButton setTitle:@"▶   Play Minecraft" forState:UIControlStateNormal];
+    self.playButton.titleLabel.font = [UIFont systemFontOfSize:20 weight:UIFontWeightBold];
+    [self.playButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    self.playButton.backgroundColor = [UIColor colorWithRed:0.43 green:0.22 blue:0.70 alpha:1.0];
+    self.playButton.layer.cornerRadius = 16;
+    self.playButton.contentEdgeInsets = UIEdgeInsetsMake(17, 18, 17, 18);
+    self.playButton.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.playButton addTarget:self action:@selector(launchMinecraftFromHome:) forControlEvents:UIControlEventTouchUpInside];
     NSMutableArray *buttons = [NSMutableArray array];
     NSArray *items = @[
         @[@"Browse Mods", @"shippingbox", @"ModBrowserViewController"],
+        @[@"Downloads & History", @"arrow.down.circle", @"STLauncherDownloadsViewController"],
+        @[@"Library & Favorites", @"books.vertical", @"ModBrowserViewController"],
         @[@"Minecraft Profiles", @"person.crop.square", @"LauncherProfilesViewController"],
         @[@"Amethyst Settings", @"gearshape", @"LauncherPreferencesViewController"]
     ];
@@ -1589,22 +1648,30 @@ static NSString * const STLauncherModeKey = @"STLauncherExperimentalMode";
     self.buttonStack.translatesAutoresizingMaskIntoConstraints = NO;
     intro.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:intro];
+    [self.view addSubview:self.playButton];
     [self.view addSubview:self.buttonStack];
     [NSLayoutConstraint activateConstraints:@[
         [intro.leadingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor constant:22],
         [intro.trailingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor constant:-22],
         [intro.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:34],
+        [self.playButton.leadingAnchor constraintEqualToAnchor:intro.leadingAnchor],
+        [self.playButton.trailingAnchor constraintEqualToAnchor:intro.trailingAnchor],
+        [self.playButton.topAnchor constraintEqualToAnchor:intro.bottomAnchor constant:24],
+        [self.playButton.heightAnchor constraintGreaterThanOrEqualToConstant:60],
         [self.buttonStack.leadingAnchor constraintEqualToAnchor:intro.leadingAnchor],
         [self.buttonStack.trailingAnchor constraintEqualToAnchor:intro.trailingAnchor],
-        [self.buttonStack.topAnchor constraintEqualToAnchor:intro.bottomAnchor constant:32]
+        [self.buttonStack.topAnchor constraintEqualToAnchor:self.playButton.bottomAnchor constant:22]
     ]];
 }
 - (void)openDestination:(UIButton *)sender {
-    NSArray *names = @[@"ModBrowserViewController", @"LauncherProfilesViewController", @"LauncherPreferencesViewController"];
+    NSArray *names = @[@"ModBrowserViewController", @"STLauncherDownloadsViewController", @"ModBrowserViewController", @"LauncherProfilesViewController", @"LauncherPreferencesViewController"];
     if (sender.tag < 0 || sender.tag >= names.count) return;
     Class cls = NSClassFromString(names[sender.tag]);
     if (!cls) return;
     UIViewController *destination = [[cls alloc] init];
+    if (sender.tag == 2 && [destination isKindOfClass:ModBrowserViewController.class]) {
+        ((ModBrowserViewController *)destination).showFavoritesOnly = YES;
+    }
     if ([[NSUserDefaults standardUserDefaults] boolForKey:STLauncherModeKey] &&
         [names[sender.tag] isEqualToString:@"ModBrowserViewController"] &&
         [[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalUI"]) {
@@ -1617,10 +1684,90 @@ static NSString * const STLauncherModeKey = @"STLauncherExperimentalMode";
         destination.view.tintColor = [UIColor colorWithRed:0.68 green:0.42 blue:1.0 alpha:1.0];
     }
 }
+- (void)launchMinecraftFromHome:(UIButton *)sender {
+    SEL launchSelector = NSSelectorFromString(@"performInstallOrShowDetails:");
+    if ([self.navigationController respondsToSelector:launchSelector]) {
+        [self.navigationController performSelector:launchSelector withObject:sender];
+    } else {
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Play unavailable" message:@"Use the Play button in the launcher toolbar to start Minecraft." preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:alert animated:YES completion:nil];
+    }
+}
 - (void)switchToAmethyst {
     [[NSUserDefaults standardUserDefaults] setBool:NO forKey:STLauncherModeKey];
     Class newsClass = NSClassFromString(@"LauncherNewsViewController");
     if (newsClass) [self.navigationController setViewControllers:@[[[newsClass alloc] init]] animated:YES];
+}
+@end
+
+@interface STLauncherDownloadsViewController ()
+@property(nonatomic) NSArray<NSDictionary *> *history;
+@end
+
+@implementation STLauncherDownloadsViewController
+- (instancetype)init {
+    self = [super initWithStyle:UITableViewStyleInsetGrouped];
+    if (self) self.title = @"Downloads";
+    return self;
+}
+- (NSString *)imageName { return @"arrow.down.circle"; }
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = @"Downloads & History";
+    self.tableView.rowHeight = UITableViewAutomaticDimension;
+    self.tableView.estimatedRowHeight = 68;
+    self.tableView.tableFooterView = [[UIView alloc] initWithFrame:CGRectZero];
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Clear" style:UIBarButtonItemStylePlain target:self action:@selector(clearHistory)];
+}
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    self.history = [[NSUserDefaults.standardUserDefaults arrayForKey:@"STLauncherDownloadHistory"] copy] ?: @[];
+    self.tableView.backgroundView = self.history.count ? nil : [self emptyState];
+    [self.tableView reloadData];
+}
+- (UIView *)emptyState {
+    UILabel *label = [[UILabel alloc] initWithFrame:self.tableView.bounds];
+    label.text = @"No downloads yet. Mods you download from the browser will appear here.";
+    label.textAlignment = NSTextAlignmentCenter;
+    label.textColor = UIColor.secondaryLabelColor;
+    label.numberOfLines = 0;
+    label.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    return label;
+}
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return self.history.count; }
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"st-download-history"];
+    if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"st-download-history"];
+    NSDictionary *item = self.history[indexPath.row];
+    BOOL success = [item[@"success"] boolValue];
+    cell.textLabel.text = item[@"filename"] ?: @"Mod download";
+    cell.textLabel.numberOfLines = 2;
+    NSDate *date = [NSDate dateWithTimeIntervalSince1970:[item[@"date"] doubleValue]];
+    NSString *size = [NSByteCountFormatter stringFromByteCount:[item[@"size"] longLongValue] countStyle:NSByteCountFormatterCountStyleFile];
+    cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ • %@ • %@", success ? @"Completed" : @"Failed", size, [NSDateFormatter localizedStringFromDate:date dateStyle:NSDateFormatterShortStyle timeStyle:NSDateFormatterShortStyle]];
+    cell.detailTextLabel.textColor = success ? UIColor.secondaryLabelColor : UIColor.systemRedColor;
+    cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    return cell;
+}
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    NSDictionary *item = self.history[indexPath.row];
+    NSString *message = [NSString stringWithFormat:@"%@\n\nPath: %@\n\n%@", [item[@"success"] boolValue] ? @"Download completed." : @"Download failed.", item[@"path"] ?: @"Unavailable", item[@"diagnostics"] ?: @"No diagnostics recorded."];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:item[@"project"] ?: @"Download details" message:message preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+- (void)clearHistory {
+    UIAlertController *confirm = [UIAlertController alertControllerWithTitle:@"Clear download history?" message:@"This removes the history list only. Downloaded files will stay in the ST Mod Browser folder." preferredStyle:UIAlertControllerStyleAlert];
+    [confirm addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [confirm addAction:[UIAlertAction actionWithTitle:@"Clear" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+        [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"STLauncherDownloadHistory"];
+        self.history = @[];
+        self.tableView.backgroundView = [self emptyState];
+        [self.tableView reloadData];
+    }]];
+    [self presentViewController:confirm animated:YES completion:nil];
 }
 @end
 
