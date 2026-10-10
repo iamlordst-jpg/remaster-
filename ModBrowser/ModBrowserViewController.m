@@ -137,9 +137,11 @@
     NSString *identifier = [record[@"id"] description] ?: @"";
     NSNumber *taskIdentifier = record[@"taskIdentifier"];
     if (taskIdentifier) {
-        for (NSURLSessionDownloadTask *task in self.session.getTasks) {
-            if (task.taskIdentifier == taskIdentifier.integerValue) { [task cancel]; break; }
-        }
+        [self.session getTasksWithCompletionHandler:^(NSArray<NSURLSessionDataTask *> *dataTasks, NSArray<NSURLSessionUploadTask *> *uploadTasks, NSArray<NSURLSessionDownloadTask *> *downloadTasks) {
+            for (NSURLSessionDownloadTask *task in downloadTasks) {
+                if (task.taskIdentifier == taskIdentifier.integerValue) { [task cancel]; break; }
+            }
+        }];
     }
     NSString *destination = record[@"destination"];
     if (destination.length) [NSFileManager.defaultManager removeItemAtPath:destination error:nil];
@@ -1126,8 +1128,8 @@
     nav.modalPresentationStyle = UIModalPresentationPageSheet;
     [self presentViewController:nav animated:YES completion:nil];
 }
-- (NSArray<UIContextualAction *> *)tableView:(UITableView *)tableView trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
-    if (indexPath.row >= self.projects.count) return @[];
+- (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
+    if (indexPath.row >= self.projects.count) return [UISwipeActionsConfiguration configurationWithActions:@[]];
     NSDictionary *project = self.projects[indexPath.row];
     NSString *projectID = project[@"project_id"] ?: @"";
     UIContextualAction *favorite = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal title:@"Favorite" handler:^(UIContextualAction *action, UIView *sourceView, void (^completionHandler)(BOOL)) {
@@ -1146,7 +1148,7 @@
         completionHandler(YES);
     }];
     collection.backgroundColor = UIColor.systemIndigoColor;
-    return @[[UISwipeActionsConfiguration configurationWithActions:@[collection, favorite]]].firstObject.actions;
+    return [UISwipeActionsConfiguration configurationWithActions:@[collection, favorite]];
 }
 
 - (void)sourceChanged:(UISegmentedControl *)sender {
