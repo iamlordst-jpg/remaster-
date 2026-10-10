@@ -1,6 +1,11 @@
 name: iOS CI
 
-on: [push, workflow_dispatch]
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ios-build-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -13,17 +18,8 @@ jobs:
     
     runs-on: macos-26
     steps:
-      - name: Remove work folders
-        run: |
-          echo "before"
-          ls -lah ./
-          rm -rf ./* || true
-          rm -rf ./.??* || true
-          echo "after"
-          ls -lah ./
-          
       - name: Checkout repository
-        uses: actions/checkout@main
+        uses: actions/checkout@v4
 
       - name: Checkout iOS submodule only
         # This workflow builds an iOS IPA; recursively checking out the root
@@ -37,57 +33,19 @@ jobs:
           git config --global url."https://github.com/facebook/fishhook.git".insteadOf "https://github.com/khanhduytran0/fishhook"
           git -C Amethyst-iOS submodule update --init --recursive
 
-      - name: Get gl4es latest commit hash
-        id: gl4es-sha
-        run: echo "sha=$(echo $(git ls-remote https://github.com/PojavLauncherTeam/gl4es-114-extra refs/heads/master | grep -io '^\S*'))" >> $GITHUB_OUTPUT
-        shell: bash
-
-      - name: Cache gl4es
-        uses: actions/cache@main
-        if: false # use gl4es 1.1.5
-        id: gl4es-cache
+      - name: Cache Homebrew downloads
+        uses: actions/cache@v4
         with:
-          path: Amethyst-iOS/gl4es/libs
-          key: gl4es-holy-ios-shared-2-${{ steps.gl4es-sha.outputs.sha }}
-
-      - name: Get gl4es
-        if: false && steps.gl4es-cache.outputs.cache-hit != 'true'
-        uses: actions/checkout@main
-        with:
-          repository: 'PojavLauncherTeam/gl4es-114-extra'
-          path: 'Amethyst-iOS/gl4es'
-
-      - name: Build gl4es
-        if: false && steps.gl4es-cache.outputs.cache-hit != 'true'
-        continue-on-error: true
-        run: |
-          cd Amethyst-iOS/gl4es
-          git config user.email "github-actions@users.noreply.github.com"
-          git config user.name "github-actions"
-          export PATH=/opt/procursus/bin:$PATH
-          wget https://github.com/leetal/ios-cmake/raw/master/ios.toolchain.cmake
-          cmake -B build -DCMAKE_TOOLCHAIN_FILE=ios.toolchain.cmake -DDEFAULT_ES=2 \
-            -DNOX11=ON -DNOEGL=OFF -DSTATICLIB=OFF -DPLATFORM=OS64 \
-            -DCMAKE_C_FLAGS=-Wno-error=implicit-function-declaration
-          cmake --build build --config RelWithDebInfo --target GL
-          cp -R lib/libGL.dylib ../Natives/resources/Frameworks/libgl4es_114.dylib
-          
-      - name: Push gl4es
-        if: false && github.event != 'pull_request' && github.ref_name == 'main' && steps.gl4es-cache.outputs.cache-hit != 'true'
-        continue-on-error: true
-        run: |
-          cd Amethyst-iOS
-          git add Natives/resources/Frameworks/libgl4es_114.dylib
-          git commit -am "CI: Update gl4es"
-          git push
+          path: ~/Library/Caches/Homebrew
+          key: ${{ runner.os }}-homebrew-${{ hashFiles('.github/workflows/ios.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-homebrew-
 
       - name: Install dependencies
         run: |
-          brew install gpatch
-          brew install make
+          brew install gpatch make ldid
           brew install --cask zulu@8
-          export JAVA_HOME=`/usr/libexec/java_home -v 1.8`
-          brew install ldid
+          echo "JAVA_HOME=$(/usr/libexec/java_home -v 1.8)" >> "$GITHUB_ENV"
 
       - name: Patch files
         run: |
@@ -95,87 +53,38 @@ jobs:
           gpatch ./Amethyst-iOS/Natives/JavaLauncher.m JavaLauncher.patch
           gpatch ./Amethyst-iOS/Natives/CMakeLists.txt CMakeLists.patch
 
-      - name: Integrate Mod Browser and experimental STLauncher
+      - name: Integrate Mod Browser
         run: |
           cp ModBrowser/ModBrowserViewController.h Amethyst-iOS/Natives/ModBrowserViewController.h
           cp ModBrowser/ModBrowserViewController.m Amethyst-iOS/Natives/ModBrowserViewController.m
           python3 - <<'PY'
           from pathlib import Path
-
           cmake = Path("Amethyst-iOS/Natives/CMakeLists.txt")
           source = cmake.read_text()
-          marker = "  LauncherMenuViewController.m\n"
-          if "  ModBrowserViewController.m\n" not in source:
-              if marker not in source:
-                  raise SystemExit("Could not find native source list in CMakeLists.txt")
-              source = source.replace(marker, marker + "  ModBrowserViewController.m\n", 1)
+          marker = "  LauncherMenuViewController.m\\n"
+          entry = "  ModBrowserViewController.m\\n"
+          if entry not in source:
+              if marker not in source: raise SystemExit("Could not find native source list in CMakeLists.txt")
+              source = source.replace(marker, marker + entry, 1)
               cmake.write_text(source)
-
           menu = Path("Amethyst-iOS/Natives/LauncherMenuViewController.m")
           source = menu.read_text()
-          import_marker = '#import "LauncherMenuViewController.h"\n'
-          if '#import "ModBrowserViewController.h"' not in source:
-              if import_marker not in source:
-                  raise SystemExit("Could not find launcher menu imports")
-              source = source.replace(import_marker, import_marker + '#import "ModBrowserViewController.h"\n', 1)
-          profiles_marker = '        [LauncherMenuCustomItem vcClass:LauncherProfilesViewController.class],\n'
-          if '[LauncherMenuCustomItem vcClass:STLauncherModeViewController.class]' not in source:
-              if profiles_marker not in source:
-                  raise SystemExit("Could not find Profiles menu entry")
-              source = source.replace(
-                  profiles_marker,
-                  profiles_marker
-                  + '        [LauncherMenuCustomItem vcClass:STLauncherModeViewController.class],\n'
-                  + '        [LauncherMenuCustomItem vcClass:ModBrowserViewController.class],\n'
-                  + '        [LauncherMenuCustomItem vcClass:STLauncherHomeViewController.class],\n',
-                  1,
-              )
-          # The launcher normally forces its account-avatar button onto every
-          # selected screen's right navigation item. That overwrites Mod Browser's
-          # filters button. Keep the browser's own navigation controls intact.
-          account_assignment = '        selected.vcArray[0].navigationItem.rightBarButtonItem = self.accountBtnItem;\n'
-          if account_assignment not in source:
-              raise SystemExit("Could not find account button assignment in LauncherMenuViewController.m")
-          source = source.replace(
-              account_assignment,
-              '        if (![selected.vcArray[0] isKindOfClass:ModBrowserViewController.class] && '              '![selected.vcArray[0] isKindOfClass:STLauncherModeViewController.class] && '              '![selected.vcArray[0] isKindOfClass:STLauncherHomeViewController.class] && '              '![selected.vcArray[0] isKindOfClass:STLauncherExperimentalFeaturesViewController.class]) {\n'
-              '            selected.vcArray[0].navigationItem.rightBarButtonItem = self.accountBtnItem;\n'
-              '        }\n',
-              1,
-          )
-          # Keep the mode selector cached separately when it swaps the content
-          # navigation stack to the experimental home screen.
-          stack_assignment = '            self.options[self.lastSelectedIndex].vcArray = contentNavigationController.viewControllers;\n'
-          if stack_assignment not in source:
-              raise SystemExit("Could not find navigation stack cache assignment")
-          source = source.replace(
-              stack_assignment,
-              '            if (![self.options[self.lastSelectedIndex].vcArray.firstObject isKindOfClass:STLauncherModeViewController.class]) {\n'
-              '                self.options[self.lastSelectedIndex].vcArray = contentNavigationController.viewControllers;\n'
-              '            }\n',
-              1,
-          )
-          initial_route = '        if(self.isInitialVc) {\n            self.isInitialVc = NO;\n        } else {\n'
-          if initial_route not in source:
-              raise SystemExit("Could not find initial launcher routing block")
-          source = source.replace(
-              initial_route,
-              '        if(self.isInitialVc) {\n'
-              '            self.isInitialVc = NO;\n'
-              '            if ([selected.vcArray.firstObject isKindOfClass:STLauncherHomeViewController.class]) {\n'
-              '                [contentNavigationController setViewControllers:selected.vcArray animated:NO];\n'
-              '            }\n'
-              '        } else {\n',
-              1,
-          )
-          initial_selection = '    NSIndexPath *indexPath = [NSIndexPath indexPathForRow:1 inSection:0];\n'
-          if initial_selection in source:
-              source = source.replace(
-                  initial_selection,
-                  '    NSUInteger initialIndex = [[NSUserDefaults standardUserDefaults] boolForKey:@"STLauncherExperimentalMode"] ? 5 : 1;\n'
-                  '    NSIndexPath *indexPath = [NSIndexPath indexPathForRow:initialIndex inSection:0];\n',
-                  1,
-              )
+          im = '#import "LauncherMenuViewController.h"\\n'
+          bi = '#import "ModBrowserViewController.h"\\n'
+          if bi not in source:
+              if im not in source: raise SystemExit("Could not find launcher menu imports")
+              source = source.replace(im, im + bi, 1)
+          entry = '        [LauncherMenuCustomItem vcClass:ModBrowserViewController.class],\\n'
+          if entry not in source:
+              pm = '        [LauncherMenuCustomItem vcClass:LauncherProfilesViewController.class],\\n'
+              if pm not in source: raise SystemExit("Could not find Profiles menu entry")
+              source = source.replace(pm, pm + entry, 1)
+          assignment = '        selected.vcArray[0].navigationItem.rightBarButtonItem = self.accountBtnItem;\\n'
+          guarded = ('        if (![selected.vcArray[0] isKindOfClass:ModBrowserViewController.class]) {\\n'
+                     '            selected.vcArray[0].navigationItem.rightBarButtonItem = self.accountBtnItem;\\n'
+                     '        }\\n')
+          if assignment in source: source = source.replace(assignment, guarded, 1)
+          elif guarded not in source: raise SystemExit("Could not locate account button assignment")
           menu.write_text(source)
           PY
 
@@ -186,18 +95,18 @@ jobs:
           export SLIMMED=1
           if [ "${{ matrix.platform_name }}" == "ios" ]; then
             # Build ipa and tipa for iOS
-            gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=${{ matrix.platform }} BRANCH=main VERBOSE=1
-            gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=${{ matrix.platform }} TROLLSTORE_JIT_ENT=1 BRANCH=main VERBOSE=1
+            gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=${{ matrix.platform }} BRANCH=main 
+            gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=${{ matrix.platform }} TROLLSTORE_JIT_ENT=1 BRANCH=main 
           elif [ "${{ matrix.platform_name }}" == "tvos" ]; then
             # Build tipa only for tvOS
-            gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=${{ matrix.platform }} TROLLSTORE_JIT_ENT=1 BRANCH=main VERBOSE=1
+            gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=${{ matrix.platform }} TROLLSTORE_JIT_ENT=1 BRANCH=main 
           else
             # Build ipa only for everything else
-            gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=${{ matrix.platform }} BRANCH=main VERBOSE=1
+            gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=${{ matrix.platform }} BRANCH=main 
           fi
 
       - name: Upload regular ipa
-        uses: actions/upload-artifact@main
+        uses: actions/upload-artifact@v4
         with:
           name: org.angelauramc.amethyst-${{ matrix.platform_name }}.ipa
           path: Amethyst-iOS/artifacts/org.angelauramc.amethyst-*-${{ matrix.platform_name }}.ipa
