@@ -1155,14 +1155,12 @@
 }
 
 - (UIBarButtonItem *)centeredIconBarButton:(NSString *)symbolName action:(SEL)action {
-    UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
-    button.frame = CGRectMake(0, 0, 44, 44);
-    button.contentHorizontalAlignment = UIControlContentHorizontalAlignmentCenter;
-    button.contentVerticalAlignment = UIControlContentVerticalAlignmentCenter;
-    [button setImage:[UIImage systemImageNamed:symbolName] forState:UIControlStateNormal];
-    button.imageView.contentMode = UIViewContentModeCenter;
-    [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
-    return [[UIBarButtonItem alloc] initWithCustomView:button];
+    // Use a native bar button so UIKit handles navigation-bar hit testing and
+    // dispatches the action reliably; SF Symbols remain centered by default.
+    return [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:symbolName]
+                                            style:UIBarButtonItemStylePlain
+                                           target:self
+                                           action:action];
 }
 - (NSString *)imageName { return @"shippingbox"; }
 - (BOOL)advancedSearchEnabled { return [[NSUserDefaults standardUserDefaults] boolForKey:@"ModBrowserAdvancedSearchEnabled"]; }
