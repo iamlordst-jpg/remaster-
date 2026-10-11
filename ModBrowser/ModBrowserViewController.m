@@ -3,6 +3,36 @@
 #import "PLProfiles.h"
 
 
+/* Modrinth responses are JSON and may contain NSNull values (for example
+   featured_gallery or organization). NSUserDefaults only accepts property-list
+   objects, so sanitize project data before saving favorites or collections. */
+static id STModBrowserPropertyListSafeValue(id value) {
+    if (!value || value == [NSNull null]) return nil;
+    if ([value isKindOfClass:NSString.class] ||
+        [value isKindOfClass:NSNumber.class] ||
+        [value isKindOfClass:NSDate.class] ||
+        [value isKindOfClass:NSData.class]) return value;
+    if ([value isKindOfClass:NSArray.class]) {
+        NSMutableArray *safeArray = [NSMutableArray arrayWithCapacity:[value count]];
+        for (id item in (NSArray *)value) {
+            id safeItem = STModBrowserPropertyListSafeValue(item);
+            if (safeItem) [safeArray addObject:safeItem];
+        }
+        return safeArray;
+    }
+    if ([value isKindOfClass:NSDictionary.class]) {
+        NSMutableDictionary *safeDictionary = [NSMutableDictionary dictionary];
+        [(NSDictionary *)value enumerateKeysAndObjectsUsingBlock:^(id key, id object, BOOL *stop) {
+            if (![key isKindOfClass:NSString.class]) return;
+            id safeObject = STModBrowserPropertyListSafeValue(object);
+            if (safeObject) safeDictionary[key] = safeObject;
+        }];
+        return safeDictionary;
+    }
+    return [value description];
+}
+
+
 @interface STDownloadCoordinator : NSObject <NSURLSessionDownloadDelegate>
 @property(nonatomic) NSURLSession *session;
 + (instancetype)shared;
@@ -377,6 +407,8 @@
 @end
 @implementation STModCollectionPicker
 + (void)presentFrom:(UIViewController *)controller project:(NSDictionary *)project {
+    NSDictionary *safeProject = STModBrowserPropertyListSafeValue(project);
+    if (![safeProject isKindOfClass:NSDictionary.class]) safeProject = @{};
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
     NSMutableDictionary *collections = [[defaults dictionaryForKey:@"STModCollections"] mutableCopy] ?: [NSMutableDictionary dictionary];
     UIAlertController *picker = [UIAlertController alertControllerWithTitle:@"Add to collection" message:@"Choose a collection or create a new one." preferredStyle:UIAlertControllerStyleActionSheet];
@@ -385,7 +417,7 @@
         NSMutableArray *items = [collections[name] mutableCopy] ?: [NSMutableArray array];
         NSString *pid = project[@"project_id"] ?: @"";
         BOOL exists = NO; for (NSDictionary *item in items) if ([[item[@"project_id"] description] isEqualToString:pid]) exists = YES;
-        if (!exists) [items addObject:project];
+        if (!exists) [items addObject:safeProject];
         collections[name] = items; [defaults setObject:collections forKey:@"STModCollections"];
         UIAlertController *done = [UIAlertController alertControllerWithTitle:@"Saved to collection" message:name preferredStyle:UIAlertControllerStyleAlert]; [done addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]]; [controller presentViewController:done animated:YES completion:nil];
     }]];
@@ -400,7 +432,7 @@
             NSMutableArray *items = [latest[name] mutableCopy] ?: [NSMutableArray array];
             NSString *pid = project[@"project_id"] ?: @"";
             BOOL exists = NO; for (NSDictionary *item in items) if ([[item[@"project_id"] description] isEqualToString:pid]) exists = YES;
-            if (!exists) [items addObject:project]; latest[name] = items; [defaults setObject:latest forKey:@"STModCollections"];
+            if (!exists) [items addObject:safeProject]; latest[name] = items; [defaults setObject:latest forKey:@"STModCollections"];
         }]];
         [controller presentViewController:create animated:YES completion:nil];
     }]];
@@ -1195,7 +1227,9 @@
     UIBarButtonItem *filtersButton = [self centeredIconBarButton:@"slider.horizontal.3" action:@selector(showFilters)];
     UIBarButtonItem *settingsButton = [self centeredIconBarButton:@"gearshape" action:@selector(showModBrowserSettings)];
     UIBarButtonItem *downloadsButton = [[UIBarButtonItem alloc] initWithTitle:@"Downloads" style:UIBarButtonItemStylePlain target:self action:@selector(openDownloadManager)];
-    self.navigationItem.rightBarButtonItems = @[filtersButton, settingsButton, downloadsButton];
+    UIBarButtonItem *libraryButton = [self centeredIconBarButton:@"books.vertical" action:@selector(openLibrary)];
+    libraryButton.accessibilityLabel = @"Favorites and Collections";
+    self.navigationItem.rightBarButtonItems = @[filtersButton, settingsButton, downloadsButton, libraryButton];
     [[STDownloadCoordinator shared] records];
     self.definesPresentationContext = YES;
     self.activity = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
@@ -1244,7 +1278,12 @@
         NSMutableArray *items = [[defaults arrayForKey:@"STModFavorites"] mutableCopy] ?: [NSMutableArray array];
         NSUInteger found = NSNotFound;
         for (NSUInteger i=0;i<items.count;i++) if ([[items[i][@"project_id"] description] isEqualToString:projectID]) { found=i; break; }
-        if (found == NSNotFound) [items addObject:project]; else [items removeObjectAtIndex:found];
+        if (found == NSNotFound) {
+            NSDictionary *safeProject = STModBrowserPropertyListSafeValue(project);
+            if (safeProject) [items addObject:safeProject];
+        } else {
+            [items removeObjectAtIndex:found];
+        }
         [defaults setObject:items forKey:@"STModFavorites"];
         completionHandler(YES);
     }];
