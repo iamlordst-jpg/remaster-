@@ -373,6 +373,27 @@ static id STModBrowserPropertyListSafeValue(id value) {
     cell.textLabel.numberOfLines = 2; cell.detailTextLabel.numberOfLines = 2;
     return cell;
 }
+- (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
+    // Collections can be deleted from the library list; swiping a saved project
+    // keeps the existing project-management behavior unchanged.
+    if (self.collectionName.length || indexPath.section != 1) return nil;
+    NSArray *names = [[self collections].allKeys sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
+    if (indexPath.row >= names.count) return nil;
+    NSString *name = names[indexPath.row];
+    UIContextualAction *deleteAction = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleDestructive title:@"Delete" handler:^(UIContextualAction *action, UIView *sourceView, void (^completionHandler)(BOOL)) {
+        UIAlertController *confirm = [UIAlertController alertControllerWithTitle:@"Delete collection?" message:[NSString stringWithFormat:@"Delete “%@” and remove its saved list? This won't delete downloaded files or affect Favorites.", name] preferredStyle:UIAlertControllerStyleAlert];
+        [confirm addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(UIAlertAction *a) { completionHandler(NO); }]];
+        [confirm addAction:[UIAlertAction actionWithTitle:@"Delete Collection" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
+            NSMutableDictionary *saved = [self collections];
+            [saved removeObjectForKey:name];
+            [[NSUserDefaults standardUserDefaults] setObject:saved forKey:@"STModCollections"];
+            [self reloadLibrary];
+            completionHandler(YES);
+        }]];
+        [self presentViewController:confirm animated:YES completion:nil];
+    }];
+    return [UISwipeActionsConfiguration configurationWithActions:@[deleteAction]];
+}
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     if (!self.collectionName.length && indexPath.section == 1) {
@@ -1227,9 +1248,8 @@ static id STModBrowserPropertyListSafeValue(id value) {
     UIBarButtonItem *filtersButton = [self centeredIconBarButton:@"slider.horizontal.3" action:@selector(showFilters)];
     UIBarButtonItem *settingsButton = [self centeredIconBarButton:@"gearshape" action:@selector(showModBrowserSettings)];
     UIBarButtonItem *downloadsButton = [[UIBarButtonItem alloc] initWithTitle:@"Downloads" style:UIBarButtonItemStylePlain target:self action:@selector(openDownloadManager)];
-    UIBarButtonItem *libraryButton = [self centeredIconBarButton:@"books.vertical" action:@selector(openLibrary)];
-    libraryButton.accessibilityLabel = @"Favorites and Collections";
-    self.navigationItem.rightBarButtonItems = @[filtersButton, settingsButton, downloadsButton, libraryButton];
+    // Keep the original toolbar layout: Downloads stays in its existing position.
+    self.navigationItem.rightBarButtonItems = @[filtersButton, settingsButton, downloadsButton];
     [[STDownloadCoordinator shared] records];
     self.definesPresentationContext = YES;
     self.activity = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
@@ -1477,6 +1497,9 @@ static id STModBrowserPropertyListSafeValue(id value) {
     BOOL turbo = [d boolForKey:@"ModBrowserTurboDownloadsEnabled"];
     BOOL caching = [self iconCachingEnabled];
     UIAlertController *m = [UIAlertController alertControllerWithTitle:@"Mod Browser Settings" message:@"Optional features and cache controls." preferredStyle:UIAlertControllerStyleActionSheet];
+    [m addAction:[UIAlertAction actionWithTitle:@"Favorites & Collections" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        [self openLibrary];
+    }]];
     [m addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"Advanced Mod Search: %@", advanced ? @"On" : @"Off"] style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
         BOOL enabled = ![d boolForKey:@"ModBrowserAdvancedSearchEnabled"];
         [d setBool:enabled forKey:@"ModBrowserAdvancedSearchEnabled"];
