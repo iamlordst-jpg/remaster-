@@ -69,14 +69,30 @@
     return compact;
 }
 - (void)saveRecords:(NSArray<NSDictionary *> *)records {
+    // Persist only the small set of fields the Download Manager actually uses.
+    // Modrinth project objects contain arbitrary nested JSON and must never be
+    // written wholesale to NSUserDefaults from background-session callbacks.
     NSMutableArray *safeRecords = [NSMutableArray arrayWithCapacity:records.count];
+    NSArray<NSString *> *recordKeys = @[@"id", @"title", @"filename", @"destination",
+                                         @"sourceURL", @"status", @"created", @"expected",
+                                         @"received", @"error"];
     for (id item in records) {
         if (![item isKindOfClass:NSDictionary.class]) continue;
-        NSMutableDictionary *record = [item mutableCopy];
-        id project = record[@"project"];
-        if ([project isKindOfClass:NSDictionary.class]) record[@"project"] = [self compactProjectRecord:project];
-        NSDictionary *safeRecord = [self propertyListSafeValue:record];
-        if ([safeRecord isKindOfClass:NSDictionary.class]) [safeRecords addObject:safeRecord];
+        NSMutableDictionary *safeRecord = [NSMutableDictionary dictionary];
+        for (NSString *key in recordKeys) {
+            id value = item[key];
+            if (value && value != [NSNull null]) {
+                id safeValue = [self propertyListSafeValue:value];
+                if (safeValue) safeRecord[key] = safeValue;
+            }
+        }
+        id project = item[@"project"];
+        if ([project isKindOfClass:NSDictionary.class]) {
+            NSDictionary *compact = [self compactProjectRecord:project];
+            NSDictionary *safeProject = [self propertyListSafeValue:compact];
+            if (safeProject) safeRecord[@"project"] = safeProject;
+        }
+        [safeRecords addObject:safeRecord];
     }
     [[NSUserDefaults standardUserDefaults] setObject:safeRecords forKey:@"STModDownloadRecords"];
 }
